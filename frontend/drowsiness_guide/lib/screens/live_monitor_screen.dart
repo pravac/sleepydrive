@@ -169,31 +169,35 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
             ),
 
             const SizedBox(height: 20),
-
-            // Drowsiness Detected Button
-            Card(
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: SizedBox(
+            height: 64,
+            child: Card(
+              clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: () {
                   Navigator.pushNamed(context, '/drowsiness-detected');
                 },
-                borderRadius: BorderRadius.circular(18),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Center(
-                    child: Text(
-                      'DROWSINESS DETECTED',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2.0,
-                        color: Colors.white.withOpacity(0.9),
-                      ),
+                child: Center(
+                  child: Text(
+                    'DROWSINESS DETECTED',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2.0,
+                      color: Colors.white.withOpacity(0.9),
                     ),
                   ),
                 ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
