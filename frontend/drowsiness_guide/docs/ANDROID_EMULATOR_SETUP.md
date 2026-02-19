@@ -40,6 +40,62 @@ This guide walks through setting up Android Studio, creating an emulator, and ru
 
 ---
 
+## Part 2.5: Set Java for the Terminal (Windows)
+
+When you run `flutter run` from the terminal, Gradle needs Java. If `java` is not on your PATH, the build can fail. Android Studio includes a JDK; use it so the terminal can find Java.
+
+### Find Android Studio's JDK
+
+On Windows the JDK is usually at:
+
+- `C:\Program Files\Android\Android Studio\jbr`  
+  or  
+- `C:\Program Files\Android\Android Studio\jre`
+
+Use the **`jbr`** folder if it exists (JetBrains Runtime). Check in File Explorer and note the path that exists on your machine.
+
+### Set JAVA_HOME for the current terminal session (PowerShell)
+
+In the same terminal you use for `flutter run` (PowerShell), run (adjust the path if yours is different):
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+```
+
+Then check that Java is found:
+
+```powershell
+java -version
+```
+
+You should see a version (e.g. 17.x). Then try:
+
+```powershell
+flutter run
+```
+
+### Make it permanent (optional)
+
+So you don't have to set this every time you open a new terminal:
+
+1. **Set JAVA_HOME**
+   - Press Windows key, search for **Environment variables**, open **Edit the system environment variables**.
+   - Click **Environment Variables…**.
+   - Under **User variables** (or **System variables**), click **New**.
+   - Variable name: `JAVA_HOME`  
+   - Variable value: `C:\Program Files\Android\Android Studio\jbr` (or your actual path).
+   - Click **OK**.
+
+2. **Add Java to PATH**
+   - In the same Environment Variables window, select **Path** → **Edit** → **New**.
+   - Add: `%JAVA_HOME%\bin`
+   - Click **OK** on all dialogs.
+
+3. **Restart Cursor** (or VS Code) and open a **new terminal**. Run `java -version` again to confirm. Then `flutter run` will be able to use Java for Gradle.
+
+---
+
 ## Part 3: Verify Flutter Setup
 
 1. In the same terminal, run:
@@ -121,6 +177,7 @@ Example: `flutter run -d emulator-5554`.
 | **No devices found** | Start the emulator from Android Studio (Device Manager → Play). Wait for it to boot, then run `flutter devices`. |
 | **App runs in Chrome instead of emulator** | In VS Code/Cursor, use the device selector in the status bar and pick the Android emulator, then run again. |
 | **Build errors** | Run `flutter clean` then `flutter pub get`, then `flutter run` again. |
+| **Gradle build fails / "java" is not recognized** | Set `JAVA_HOME` and add Java to `PATH` using Android Studio's `jbr` (see Part 2.5). |
 
 ---
 
