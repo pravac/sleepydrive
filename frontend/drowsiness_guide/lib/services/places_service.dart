@@ -70,6 +70,71 @@ class PlacesService {
 
     return places;
   }
+
+  /// Fetches nearest rest stops (rest areas). Caller should filter by distance (e.g. 30 mi).
+  Future<List<PlaceSummary>> fetchNearestRestStops({
+    required double lat,
+    required double lon,
+    int maxResults = 20,
+  }) async {
+    if (apiKey.isEmpty || apiKey == 'YOUR_GOOGLE_PLACES_API_KEY') {
+      throw Exception(
+        'Missing Google Places API key. Set googlePlacesApiKey in lib/secrets.dart.',
+      );
+    }
+
+    final uri = Uri.https(
+      'maps.googleapis.com',
+      '/maps/api/place/nearbysearch/json',
+      {
+        'location': '$lat,$lon',
+        'rankby': 'distance',
+        'keyword': 'rest area',
+        'key': apiKey,
+      },
+    );
+
+    final res = await http.get(uri);
+    if (res.statusCode != 200) {
+      throw Exception('Places HTTP ${res.statusCode}: ${res.body}');
+    }
+
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final status = (data['status'] ?? 'UNKNOWN') as String;
+    if (status != 'OK' && status != 'ZERO_RESULTS') {
+      final msg = (data['error_message'] ?? data['status'] ?? 'Unknown error').toString();
+      throw Exception('Places error $status: $msg');
+    }
+
+    final results = (data['results'] as List? ?? const []);
+    final places = <PlaceSummary>[];
+    for (final item in results) {
+      if (places.length >= maxResults) break;
+      if (item is! Map<String, dynamic>) continue;
+
+      final geometry = item['geometry'] as Map<String, dynamic>?;
+      final loc = geometry?['location'] as Map<String, dynamic>?;
+      final pLat = (loc?['lat'] as num?)?.toDouble();
+      final pLng = (loc?['lng'] as num?)?.toDouble();
+      if (pLat == null || pLng == null) continue;
+
+      final name = (item['name'] ?? 'Rest area').toString();
+      final vicinity = (item['vicinity'] ?? item['formatted_address'] ?? '').toString();
+      final placeId = (item['place_id'] ?? '').toString();
+
+      places.add(
+        PlaceSummary(
+          name: name,
+          vicinity: vicinity,
+          placeId: placeId,
+          lat: pLat,
+          lon: pLng,
+        ),
+      );
+    }
+
+    return places;
+  }
 }
 
 class PlaceSummary {
