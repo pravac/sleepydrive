@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/weather_service.dart';
+import '../services/ble_service.dart';
 import '../secrets.dart';
 
 // -------------------- Color System --------------------
@@ -33,10 +35,85 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
 
   bool _weatherLoading = false;
 
+  // ── BLE ──
+  final BleService _ble = BleService();
+  String _bleState = 'Disconnected';
+  StreamSubscription? _bleStateSub;
+  StreamSubscription? _bleAlertSub;
+
   @override
   void initState() {
     super.initState();
     _loadLocationOnce();
+
+    // Listen for BLE connection state changes
+    _bleStateSub = _ble.connectionState.listen((state) {
+      if (!mounted) return;
+      setState(() => _bleState = state);
+    });
+
+    // Listen for BLE alerts and show notification dialog
+    _bleAlertSub = _ble.alerts.listen(_showAlertNotification);
+  }
+
+  @override
+  void dispose() {
+    _bleStateSub?.cancel();
+    _bleAlertSub?.cancel();
+    _ble.dispose();
+    super.dispose();
+  }
+
+  void _showAlertNotification(BleAlert alert) {
+    if (!mounted) return;
+
+    final isWarning = alert.level == 1;
+    final isDanger = alert.level >= 2;
+    final color = isDanger
+        ? const Color(0xFFEF4444)
+        : isWarning
+            ? const Color(0xFFF59E0B)
+            : _accentBlue;
+    final icon = isDanger ? Icons.warning_rounded : Icons.info_outline;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2332),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: color, width: 2),
+        ),
+        icon: Icon(icon, color: color, size: 48),
+        title: Text(
+          alert.levelLabel,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 2,
+          ),
+        ),
+        content: Text(
+          alert.message,
+          style: const TextStyle(color: Colors.white, fontSize: 16),
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('OK', style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onBluetoothTap() async {
+    if (_bleState == 'Connected') {
+      await _ble.disconnect();
+    } else if (_bleState == 'Disconnected' || _bleState == 'Not found' || _bleState == 'Connection failed') {
+      await _ble.scanAndConnect();
+    }
   }
 
   Future<void> _loadLocationOnce() async {
@@ -124,6 +201,20 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
         ),
         actions: [
           IconButton(
+            onPressed: _onBluetoothTap,
+            tooltip: _bleState == 'Connected' ? 'Disconnect BLE' : 'Connect to SleepyDrive',
+            icon: Icon(
+              _bleState == 'Connected'
+                  ? Icons.bluetooth_connected
+                  : _bleState == 'Scanning…' || _bleState == 'Connecting…'
+                      ? Icons.bluetooth_searching
+                      : Icons.bluetooth,
+              color: _bleState == 'Connected'
+                  ? _accentBlue
+                  : Colors.black,
+            ),
+          ),
+          IconButton(
             onPressed: _loadLocationOnce,
             icon: const Icon(Icons.my_location, color: Colors.black),
           ),
@@ -149,6 +240,10 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> {
                 spacing: 10,
                 runSpacing: 10,
                 children: [
+                  _StatusChip(
+                    label: "BLE",
+                    value: _bleState,
+                  ),
                   const _StatusChip(label: "Face", value: "Detected"),
                   const _StatusChip(label: "Eyes", value: "Open"),
                   const _StatusChip(label: "Alert", value: "None"),
