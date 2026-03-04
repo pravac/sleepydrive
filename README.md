@@ -29,6 +29,7 @@ any machine:
 
  cd frontend\drowsiness_guide   
 
-flutter run --dart-define=JETSON_WS_URL=ws://169.233.117.151:8080/ws/alerts?replay=0
+flutter run --dart-define=JETSON_WS_URL=wss://sleepydrive.onrender.com/ws/alerts?replay=0   
+
 
   
