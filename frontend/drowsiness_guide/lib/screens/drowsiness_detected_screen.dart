@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:drowsiness_guide/screens/osm_map_screen.dart';
 import 'package:drowsiness_guide/services/osm_places_service.dart';
+import 'package:drowsiness_guide/app.dart';
 
 class DrowsinessDetectedScreen extends StatefulWidget {
   const DrowsinessDetectedScreen({super.key});
@@ -111,9 +112,7 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
         color: Colors.white.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.black.withValues(alpha: 0.12)),
-        boxShadow: const [
-          BoxShadow(blurRadius: 12, color: Colors.black12),
-        ],
+        boxShadow: const [BoxShadow(blurRadius: 12, color: Colors.black12)],
       ),
       child: child,
     );
@@ -123,14 +122,25 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
     return FilledButton.styleFrom(
       backgroundColor: _brandBlue,
       foregroundColor: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = DriverSafetyApp.of(context).isDark;
+    final bgTop = isDark ? const Color(0xFF0B1220) : const Color(0xFFCED8E4);
+    final bgBottom = isDark ? const Color(0xFF0E1628) : const Color(0xFF7E97B9);
+    final cardColor = isDark
+        ? const Color(0xFF1E2D40)
+        : Colors.white.withOpacity(0.95);
+    final textColor = isDark ? Colors.white : Colors.black;
+    final subColor = isDark
+        ? Colors.white.withOpacity(0.6)
+        : Colors.black.withOpacity(0.65);
+    final borderColor = isDark
+        ? Colors.white.withOpacity(0.08)
+        : Colors.black.withOpacity(0.12);
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -170,10 +180,10 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                 const SizedBox(height: 6),
                 Text(
                   'If you feel drowsy, pull over somewhere safe.',
-                    style: TextStyle(
-                      color: Colors.black.withValues(alpha: 0.65),
-                      fontWeight: FontWeight.w500,
-                    ),
+                  style: TextStyle(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 12),
 
@@ -185,7 +195,9 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                   const SizedBox(height: 12),
                   Text(
                     'Finding nearby gas stations…',
-                    style: TextStyle(color: Colors.black.withValues(alpha: 0.65)),
+                    style: TextStyle(
+                      color: Colors.black.withValues(alpha: 0.65),
+                    ),
                   ),
                 ] else if (_err != null) ...[
                   _flatCard(
@@ -204,9 +216,9 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                           const SizedBox(height: 8),
                           Text(
                             _err!,
-                              style: TextStyle(
-                                color: Colors.black.withValues(alpha: 0.65),
-                              ),
+                            style: TextStyle(
+                              color: Colors.black.withValues(alpha: 0.65),
+                            ),
                           ),
                           const SizedBox(height: 12),
                           FilledButton.icon(
@@ -225,7 +237,9 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                       padding: const EdgeInsets.all(14),
                       child: Text(
                         'No results found.',
-                        style: TextStyle(color: Colors.black.withValues(alpha: 0.7)),
+                        style: TextStyle(
+                          color: Colors.black.withValues(alpha: 0.7),
+                        ),
                       ),
                     ),
                   ),
@@ -264,16 +278,20 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                                       s.vicinity,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                       style: TextStyle(
-                                         color: Colors.black.withValues(alpha: 0.65),
-                                       ),
+                                      style: TextStyle(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.65,
+                                        ),
+                                      ),
                                     ),
                                   const SizedBox(height: 8),
                                   Text(
                                     _formatMiles(s.distanceMeters),
                                     style: TextStyle(
                                       fontWeight: FontWeight.w800,
-                                      color: Colors.black.withValues(alpha: 0.8),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.8,
+                                      ),
                                     ),
                                   ),
                                   const Spacer(),
@@ -301,10 +319,11 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                                         child: OutlinedButton(
                                           style: OutlinedButton.styleFrom(
                                             foregroundColor: Colors.black,
-                                              side: BorderSide(
-                                                color:
-                                                    Colors.black.withValues(alpha: 0.18),
+                                            side: BorderSide(
+                                              color: Colors.black.withValues(
+                                                alpha: 0.18,
                                               ),
+                                            ),
                                             shape: RoundedRectangleBorder(
                                               borderRadius:
                                                   BorderRadius.circular(8),
@@ -327,7 +346,9 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
                   const SizedBox(height: 12),
                   Text(
                     'Preview Map shows the route in-app. Directions opens Google Maps.',
-                    style: TextStyle(color: Colors.black.withValues(alpha: 0.6)),
+                    style: TextStyle(
+                      color: Colors.black.withValues(alpha: 0.6),
+                    ),
                   ),
                 ],
               ],
