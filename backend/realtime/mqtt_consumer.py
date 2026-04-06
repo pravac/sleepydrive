@@ -68,13 +68,21 @@ class MQTTConsumer:
             messages = client.messages
             for topic in self._settings.mqtt_topics:
                 await client.subscribe(topic, qos=self._settings.mqtt_qos)
-                log.info("Subscribed to MQTT topic: %s", topic)
+                log.info("Subscribed to MQTT topic: %s (qos=%s)", topic, self._settings.mqtt_qos)
 
             async for message in messages:
                 if stop_event.is_set():
                     break
                 topic = str(message.topic)
                 payload = bytes(message.payload)
+                max_b = self._settings.max_mqtt_payload_bytes
+                if len(payload) > max_b:
+                    log.warning(
+                        "MQTT payload %d bytes exceeds max %d; truncating",
+                        len(payload),
+                        max_b,
+                    )
+                    payload = payload[:max_b]
                 await self._handle_message(topic=topic, payload=payload)
 
     def _build_tls_context(self) -> ssl.SSLContext | None:
@@ -97,12 +105,33 @@ class MQTTConsumer:
     async def _handle_message(self, topic: str, payload: bytes) -> None:
         presence = parse_presence_payload(topic=topic, payload=payload)
         if presence is not None:
-            if self._on_presence is not None:
-                await self._on_presence(presence)
+            await self._notify_presence(presence)
             log.info("Presence update: source=%s online=%s", presence.source_id, presence.online)
             return
 
         event = parse_mqtt_payload(topic=topic, payload=payload)
         saved = await self._repository.insert(event)
-        await self._on_event(saved)
+        await self._notify_event(saved)
         log.info("Event persisted and broadcast: device=%s level=%s", saved.device_id, saved.level)
+
+    async def _notify_event(self, saved: AlertEvent) -> None:
+        try:
+            await self._on_event(saved)
+        except Exception:
+            log.exception(
+                "WebSocket broadcast failed after DB persist (device=%s id=%s); "
+                "MQTT message will still be acked to avoid duplicate rows",
+                saved.device_id,
+                saved.id,
+            )
+
+    async def _notify_presence(self, presence: JetsonPresence) -> None:
+        if self._on_presence is None:
+            return
+        try:
+            await self._on_presence(presence)
+        except Exception:
+            log.exception(
+                "Presence broadcast failed (source=%s); MQTT message still acked",
+                presence.source_id,
+            )
