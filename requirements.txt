@@ -1,1 +1,4 @@
--r backend/requirements.txt
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+asyncpg>=0.29.0
+aiomqtt>=2.0.0

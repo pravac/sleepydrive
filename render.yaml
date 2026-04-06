@@ -1,0 +1,13 @@
+# Render Blueprint: sets backend/ as the app root so build/start find requirements.txt and app.py.
+# Sync from the Render dashboard (Blueprint) or mirror these settings on an existing Web Service:
+#   Root Directory: backend
+#   Build Command:  pip install -r requirements.txt
+#   Start Command:  uvicorn app:app --host 0.0.0.0 --port $PORT
+
+services:
+  - type: web
+    name: sleepydrive-gateway
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
