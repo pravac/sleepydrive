@@ -1,2 +1,0 @@
-"""SleepyDrive realtime backend package."""
-

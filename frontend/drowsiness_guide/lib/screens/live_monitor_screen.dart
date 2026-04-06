@@ -5,14 +5,13 @@ import '../services/weather_service.dart';
 import '../services/ble_service.dart';
 import '../services/jetson_websocket_service.dart';
 import '../secrets.dart';
+import '../app.dart';
 
 // -------------------- Color System --------------------
 
 Color _black(double opacity) => Colors.black.withAlpha((opacity * 255).round());
 
 const _accentBlue = Color(0xFF5E8AD6);
-const _bgTop = Color(0xFFCED8E4);
-const _bgBottom = Color(0xFF7E97B9);
 const _surface = Color(0xFFF7FAFF);
 const _border = Color(0x1A000000);
 
@@ -25,9 +24,12 @@ class LiveMonitorScreen extends StatefulWidget {
   State<LiveMonitorScreen> createState() => _LiveMonitorScreenState();
 }
 
-class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindingObserver {
-  static const String _jetsonWsUrl =
-      String.fromEnvironment('JETSON_WS_URL', defaultValue: 'ws://localhost:8080/ws/alerts?replay=0');
+class _LiveMonitorScreenState extends State<LiveMonitorScreen>
+    with WidgetsBindingObserver {
+  static const String _jetsonWsUrl = String.fromEnvironment(
+    'JETSON_WS_URL',
+    defaultValue: 'ws://localhost:8080/ws/alerts?replay=0',
+  );
   String? _latText;
   String? _lonText;
   String? _locErr;
@@ -122,7 +124,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      final isConnected = _wsIsConnected(_jetsonWsState) || _wsIsBusy(_jetsonWsState);
+      final isConnected =
+          _wsIsConnected(_jetsonWsState) || _wsIsBusy(_jetsonWsState);
       if (!isConnected) {
         _jetsonWs.connect();
       }
@@ -153,7 +156,12 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
         _alerts.removeRange(12, _alerts.length);
       }
     });
-    _showAlertSnackBar(level: level, levelLabel: levelLabel, message: message, source: source);
+    _showAlertSnackBar(
+      level: level,
+      levelLabel: levelLabel,
+      message: message,
+      source: source,
+    );
   }
 
   void _handleJetsonPresence(JetsonPresence presence) {
@@ -169,7 +177,9 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
     _jetsonPresenceTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
       final lastSeen = _jetsonLastSeen;
-      final stale = lastSeen == null || DateTime.now().difference(lastSeen) > _jetsonStaleAfter;
+      final stale =
+          lastSeen == null ||
+          DateTime.now().difference(lastSeen) > _jetsonStaleAfter;
       if (stale && _jetsonDeviceState != 'Offline') {
         setState(() {
           _jetsonDeviceState = 'Offline';
@@ -189,8 +199,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
     final bg = level >= 2
         ? const Color(0xFFB91C1C)
         : level == 1
-            ? const Color(0xFFB45309)
-            : const Color(0xFF1E3A8A);
+        ? const Color(0xFFB45309)
+        : const Color(0xFF1E3A8A);
 
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
@@ -210,13 +220,16 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
   void _onBluetoothTap() async {
     if (_bleState == 'Connected') {
       await _ble.disconnect();
-    } else if (_bleState == 'Disconnected' || _bleState == 'Not found' || _bleState == 'Connection failed') {
+    } else if (_bleState == 'Disconnected' ||
+        _bleState == 'Not found' ||
+        _bleState == 'Connection failed') {
       await _ble.scanAndConnect();
     }
   }
 
   void _onJetsonWebSocketTap() async {
-    final isActive = _wsIsConnected(_jetsonWsState) || _wsIsBusy(_jetsonWsState);
+    final isActive =
+        _wsIsConnected(_jetsonWsState) || _wsIsBusy(_jetsonWsState);
     if (isActive) {
       await _jetsonWs.disconnect();
     } else {
@@ -287,22 +300,27 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) {
+    final isDark = DriverSafetyApp.of(context).isDark;
+    final bgTop = isDark ? const Color(0xFF0B1220) : const Color(0xFFCED8E4);
+    final bgBottom = isDark ? const Color(0xFF0E1628) : const Color(0xFF7E97B9);
+    final titleColor = isDark ? Colors.white : Colors.black;
+    final iconColor = isDark ? Colors.white : Colors.black;
     const driverId = "Sluggish Driver";
     const vehicle = "SlugMobile";
     const fatigueRisk = 42;
     const status = "Normal";
 
     return Scaffold(
-      backgroundColor: _bgTop,
+      backgroundColor: bgTop,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.black),
-        title: const Text(
+        iconTheme: IconThemeData(color: iconColor),
+        title: Text(
           'blink',
           style: TextStyle(
-            color: Colors.black,
+            color: titleColor,
             fontWeight: FontWeight.w600,
             letterSpacing: 2,
           ),
@@ -310,16 +328,16 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
         actions: [
           IconButton(
             onPressed: _onBluetoothTap,
-            tooltip: _bleState == 'Connected' ? 'Disconnect BLE' : 'Connect to SleepyDrive',
+            tooltip: _bleState == 'Connected'
+                ? 'Disconnect BLE'
+                : 'Connect to SleepyDrive',
             icon: Icon(
               _bleState == 'Connected'
                   ? Icons.bluetooth_connected
                   : _bleState == 'Scanning…' || _bleState == 'Connecting…'
-                      ? Icons.bluetooth_searching
-                      : Icons.bluetooth,
-              color: _bleState == 'Connected'
-                  ? _accentBlue
-                  : Colors.black,
+                  ? Icons.bluetooth_searching
+                  : Icons.bluetooth,
+              color: _bleState == 'Connected' ? _accentBlue : Colors.black,
             ),
           ),
           IconButton(
@@ -331,9 +349,11 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
               _wsIsConnected(_jetsonWsState)
                   ? Icons.wifi_tethering
                   : _wsIsBusy(_jetsonWsState)
-                      ? Icons.sync
-                      : Icons.wifi_tethering_off,
-              color: _wsIsConnected(_jetsonWsState) ? _accentBlue : Colors.black,
+                  ? Icons.sync
+                  : Icons.wifi_tethering_off,
+              color: _wsIsConnected(_jetsonWsState)
+                  ? _accentBlue
+                  : Colors.black,
             ),
           ),
           IconButton(
@@ -343,11 +363,11 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [_bgTop, _bgBottom],
+            colors: [bgTop, bgBottom],
           ),
         ),
         child: Padding(
@@ -362,14 +382,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  _StatusChip(
-                    label: "BLE",
-                    value: _bleState,
-                  ),
-                  _StatusChip(
-                    label: "Jetson WS",
-                    value: _jetsonWsState,
-                  ),
+                  _StatusChip(label: "BLE", value: _bleState),
+                  _StatusChip(label: "Jetson WS", value: _jetsonWsState),
                   _StatusChip(
                     label: "Jetson Device",
                     value: _jetsonDeviceState,
@@ -379,19 +393,27 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
                   _StatusChip(label: "Alert", value: _latestAlertLevel),
                   _StatusChip(
                     label: "Lat",
-                    value: _latText ?? (_locErr == null ? "Loading…" : "Unavailable"),
+                    value:
+                        _latText ??
+                        (_locErr == null ? "Loading…" : "Unavailable"),
                   ),
                   _StatusChip(
                     label: "Lon",
-                    value: _lonText ?? (_locErr == null ? "Loading…" : "Unavailable"),
+                    value:
+                        _lonText ??
+                        (_locErr == null ? "Loading…" : "Unavailable"),
                   ),
                   _StatusChip(
                     label: "Weather",
-                    value: _weatherCondition ?? (_weatherErr == null ? "Loading…" : "Unavailable"),
+                    value:
+                        _weatherCondition ??
+                        (_weatherErr == null ? "Loading…" : "Unavailable"),
                   ),
                   _StatusChip(
                     label: "Temp",
-                    value: _tempText ?? (_weatherErr == null ? "Loading…" : "Unavailable"),
+                    value:
+                        _tempText ??
+                        (_weatherErr == null ? "Loading…" : "Unavailable"),
                   ),
                 ],
               ),
@@ -426,7 +448,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen> with WidgetsBindi
               ),
               child: InkWell(
                 borderRadius: BorderRadius.circular(16),
-                onTap: () => Navigator.pushNamed(context, '/drowsiness-detected'),
+                onTap: () =>
+                    Navigator.pushNamed(context, '/drowsiness-detected'),
                 child: const Center(
                   child: Text(
                     'DROWSINESS DETECTED',
@@ -491,10 +514,7 @@ class _HeaderCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text(
-                    vehicle,
-                    style: TextStyle(color: _black(0.6)),
-                  ),
+                  Text(vehicle, style: TextStyle(color: _black(0.6))),
                 ],
               ),
             ),
@@ -624,10 +644,7 @@ class _StatusChip extends StatelessWidget {
           Text("$label: ", style: TextStyle(color: _black(0.55))),
           Text(
             value,
-            style: TextStyle(
-              color: _black(0.8),
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(color: _black(0.8), fontWeight: FontWeight.w700),
           ),
         ],
       ),
@@ -699,7 +716,10 @@ class _AlertsCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.notifications_active_outlined, color: _accentBlue),
+                const Icon(
+                  Icons.notifications_active_outlined,
+                  color: _accentBlue,
+                ),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
@@ -711,7 +731,10 @@ class _AlertsCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: _black(0.06),
                     borderRadius: BorderRadius.circular(999),
@@ -727,17 +750,11 @@ class _AlertsCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 if (alerts.isNotEmpty)
-                  TextButton(
-                    onPressed: onClear,
-                    child: const Text('Clear'),
-                  ),
+                  TextButton(onPressed: onClear, child: const Text('Clear')),
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              wsUrl,
-              style: TextStyle(color: _black(0.52), fontSize: 11),
-            ),
+            Text(wsUrl, style: TextStyle(color: _black(0.52), fontSize: 11)),
             const SizedBox(height: 8),
             if (alerts.isEmpty)
               Text(
