@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:drowsiness_guide/app.dart';
 
 class OSMMapScreen extends StatefulWidget {
   final double? destLat;
@@ -129,10 +130,9 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
           .cast<List<dynamic>>();
 
       final pts = coords
-          .map((c) => LatLng(
-                (c[1] as num).toDouble(),
-                (c[0] as num).toDouble(),
-              ))
+          .map(
+            (c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble()),
+          )
           .toList();
 
       setState(() {
@@ -187,6 +187,16 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = DriverSafetyApp.of(context).isDark;
+    final bgTop = isDark ? const Color(0xFF0B1220) : const Color(0xFFCED8E4);
+    final bgBottom = isDark ? const Color(0xFF0E1628) : const Color(0xFF7E97B9);
+    final overlayColor = isDark
+        ? const Color(0xFF1E2D40)
+        : Colors.white.withOpacity(0.95);
+    final overlayText = isDark ? Colors.white : Colors.black;
+    final borderColor = isDark
+        ? Colors.white.withOpacity(0.08)
+        : Colors.black.withOpacity(0.12);
     final me = _pos == null ? null : LatLng(_pos!.latitude, _pos!.longitude);
 
     return Scaffold(
@@ -267,7 +277,9 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
                                   shape: BoxShape.circle,
                                   color: _brandBlue,
                                   border: Border.all(
-                                      color: Colors.white, width: 2),
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
                                   boxShadow: const [
                                     BoxShadow(
                                       blurRadius: 8,
@@ -287,7 +299,9 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
                                   shape: BoxShape.circle,
                                   color: const Color(0xFFD65E5E),
                                   border: Border.all(
-                                      color: Colors.white, width: 2),
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
                                   boxShadow: const [
                                     BoxShadow(
                                       blurRadius: 8,
@@ -308,12 +322,15 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
                     right: 12,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(10),
-                        border:
-                            Border.all(color: Colors.black.withValues(alpha: 0.12)),
+                        border: Border.all(
+                          color: Colors.black.withValues(alpha: 0.12),
+                        ),
                         boxShadow: const [
                           BoxShadow(blurRadius: 12, color: Colors.black12),
                         ],
@@ -338,7 +355,9 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
                                 backgroundColor: _brandBlue,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -356,12 +375,15 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
                     bottom: 10,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.88),
                         borderRadius: BorderRadius.circular(10),
-                        border:
-                            Border.all(color: Colors.black.withValues(alpha: 0.10)),
+                        border: Border.all(
+                          color: Colors.black.withValues(alpha: 0.10),
+                        ),
                       ),
                       child: const Text(
                         '© OpenStreetMap contributors • © CARTO',
