@@ -43,6 +43,13 @@ CREATE INDEX IF NOT EXISTS idx_alert_events_device_received
 ON alert_events (device_id, received_ts DESC);
 """
 
+USERS_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    uid TEXT PRIMARY KEY,
+    role TEXT NOT NULL CHECK (role IN ('driver', 'operator'))
+);
+"""
+
 
 class Database:
     def __init__(
@@ -81,6 +88,7 @@ class Database:
     async def init_schema(self) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(SCHEMA_SQL)
+            await conn.execute(USERS_SQL)
 
     async def ping(self) -> None:
         async with self.pool.acquire() as conn:
@@ -90,4 +98,3 @@ class Database:
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
-

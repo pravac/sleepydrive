@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'screens/live_monitor_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/osm_map_screen.dart';
+import 'screens/role_selection_screen.dart';
+import 'screens/fleet_operator_dashboard.dart';
 
 class DriverSafetyApp extends StatefulWidget {
   const DriverSafetyApp({super.key});
@@ -82,6 +84,17 @@ class _DriverSafetyAppState extends State<DriverSafetyApp> {
       routes: {
         '/dashboard': (context) => const LiveMonitorScreen(),
         '/map': (context) => const OSMMapScreen(),
+        '/select-role': (context) {
+          final args =
+              ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+
+          return RoleSelectionScreen(
+            email: args['email'] as String,
+            password: args['password'] as String,
+          );
+        },
+        '/fleet-dashboard': (context) => const FleetOperatorDashboard(),
+        '/login': (context) => const LoginScreen(),
       },
 
       home: StreamBuilder<User?>(

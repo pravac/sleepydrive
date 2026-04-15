@@ -37,6 +37,26 @@ class AuthService {
     return await _auth.signInWithCredential(credential);
   }
 
+  Future<UserCredential> signInWithEmailPassword({
+    required String email,
+    required String password,
+  }) async {
+    return await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+  }
+
+  Future<UserCredential> createUserWithEmailPassword({
+    required String email,
+    required String password,
+  }) async {
+    return await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+  }
+
   Future<void> signOut() async {
     if (!kIsWeb) {
       await _googleSignIn.signOut();

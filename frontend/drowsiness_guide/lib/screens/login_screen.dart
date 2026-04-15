@@ -1,5 +1,9 @@
+import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:drowsiness_guide/app.dart';
 import 'package:drowsiness_guide/services/auth_service.dart';
 
@@ -13,8 +17,117 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
 
+  static const String _backendBaseUrl = String.fromEnvironment(
+    'BACKEND_BASE_URL',
+    defaultValue: 'http://localhost:8000',
+  );
+
+  final TextEditingController _emailCtrl = TextEditingController();
+  final TextEditingController _passCtrl = TextEditingController();
+
   bool _isLoading = false;
+  bool _isCreateMode = false;
   String? _errorText;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<String> _fetchUserRole(String uid) async {
+    final response = await http.get(
+      Uri.parse('$_backendBaseUrl/users/$uid'),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Failed to fetch user role');
+    }
+
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    return decoded['role'] as String;
+  }
+
+  Future<void> _routeSignedInUser() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw Exception('No authenticated user found');
+    }
+
+    final role = await _fetchUserRole(user.uid);
+
+    if (!mounted) return;
+
+    if (role == 'operator') {
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/fleet-dashboard',
+        (route) => false,
+      );
+    } else {
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/dashboard',
+        (route) => false,
+      );
+    }
+  }
+
+  Future<void> _handleEmailAuth() async {
+    final email = _emailCtrl.text.trim();
+    final password = _passCtrl.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        _errorText = 'Please enter both email and password';
+      });
+      return;
+    }
+
+    if (password.length < 6) {
+      setState(() {
+        _errorText = 'Password must be at least 6 characters';
+      });
+      return;
+    }
+
+    if (_isCreateMode) {
+      Navigator.pushNamed(
+        context,
+        '/select-role',
+        arguments: {
+          'email': email,
+          'password': password,
+        },
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorText = null;
+    });
+
+    try {
+      await _authService.signInWithEmailPassword(
+        email: email,
+        password: password,
+      );
+
+      await _routeSignedInUser();
+    } on Exception catch (e) {
+      setState(() {
+        _errorText = _friendlyAuthError(e);
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   Future<void> _handleGoogleSignIn() async {
     setState(() {
@@ -27,16 +140,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (result == null) {
         setState(() {
-          _errorText = "Sign-in was cancelled";
+          _errorText = 'Sign-in was cancelled';
         });
+      } else {
+        await _routeSignedInUser();
       }
     } catch (e, st) {
-    debugPrint('Google sign-in error: $e');
-    debugPrintStack(stackTrace: st);
+      debugPrint('Google sign-in error: $e');
+      debugPrintStack(stackTrace: st);
 
-    setState(() {
-      _errorText = "Google sign-in failed: $e";
-    });
+      setState(() {
+        _errorText = 'Google sign-in failed: $e';
+      });
     } finally {
       if (mounted) {
         setState(() {
@@ -46,21 +161,72 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  String _friendlyAuthError(Object error) {
+    final text = error.toString();
+
+    if (text.contains('invalid-credential')) {
+      return 'Invalid email or password';
+    }
+    if (text.contains('invalid-email')) {
+      return 'Please enter a valid email';
+    }
+    if (text.contains('email-already-in-use')) {
+      return 'An account already exists with this email';
+    }
+    if (text.contains('weak-password')) {
+      return 'Password is too weak';
+    }
+    if (text.contains('user-not-found')) {
+      return 'No account found for this email';
+    }
+    if (text.contains('wrong-password')) {
+      return 'Invalid email or password';
+    }
+    if (text.contains('Failed to fetch user role')) {
+      return 'Signed in, but could not load account role';
+    }
+
+    return 'Authentication failed';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isDark = DriverSafetyApp.of(context).isDark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgTop = isDark ? const Color(0xFF0D1117) : const Color(0xFFCED8E4);
-    final bgBottom = isDark ? const Color(0xFF1A2332) : const Color(0xFF7E97B9);
+    final bgBottom =
+        isDark ? const Color(0xFF1A2332) : const Color(0xFF7E97B9);
+
     final textColor = isDark ? Colors.white : Colors.black;
     final subTextColor = isDark
         ? Colors.white.withOpacity(0.7)
         : Colors.black.withOpacity(0.7);
-    final buttonColor = const Color(0xFF5E8AD6);
+
+    final fieldFill = isDark
+        ? const Color(0xFF1E2D40)
+        : Colors.white.withOpacity(0.96);
+
+    final hintColor = isDark
+        ? Colors.white.withOpacity(0.42)
+        : Colors.black.withOpacity(0.55);
+
+    final borderColor = isDark
+        ? Colors.white.withOpacity(0.08)
+        : Colors.black.withOpacity(0.10);
+
+    final focusBorder = isDark
+        ? Colors.white.withOpacity(0.28)
+        : Colors.black.withOpacity(0.22);
+
+    final primaryButtonColor =
+        isDark ? const Color(0xFF6E95DC) : const Color(0xFF5E8AD6);
 
     return Scaffold(
       floatingActionButton: FloatingActionButton.small(
         tooltip: 'Toggle theme',
-        onPressed: () => DriverSafetyApp.of(context).toggleTheme(),
+        onPressed: () {
+          debugPrint('theme toggled');
+          DriverSafetyApp.of(context).toggleTheme();
+        },
         child: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
       ),
       body: Container(
@@ -79,75 +245,241 @@ class _LoginScreenState extends State<LoginScreen> {
               constraints: const BoxConstraints(maxWidth: 420),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      "BLINK",
-                      style: GoogleFonts.megrim(
-                        fontSize: 52,
-                        letterSpacing: 12,
-                        color: textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    const SizedBox(height: 42),
-                    SizedBox(
-                      width: 290,
-                      height: 58,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(isDark ? 0.28 : 0.12),
-                              blurRadius: 18,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'BLINK',
+                        style: GoogleFonts.megrim(
+                          fontSize: 52,
+                          letterSpacing: 12,
+                          color: textColor,
                         ),
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: isDark ? const Color(0xFF6E95DC) : const Color(0xFF5E8AD6),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                          ),
-                          onPressed: _isLoading ? null : _handleGoogleSignIn,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              if (_isLoading)
-                                const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              else
-                                const Icon(Icons.login_rounded, size: 24),
-                              const SizedBox(width: 12),
-                              Text(
-                                _isLoading ? "Signing in..." : "Continue with Google",
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.2,
+                      ),
+                      const SizedBox(height: 36),
+                      _FlatField(
+                        controller: _emailCtrl,
+                        hint: 'email',
+                        obscure: false,
+                        textColor: textColor,
+                        hintColor: hintColor,
+                        fillColor: fieldFill,
+                        borderColor: borderColor,
+                        focusBorderColor: focusBorder,
+                      ),
+                      const SizedBox(height: 14),
+                      _FlatField(
+                        controller: _passCtrl,
+                        hint: 'password',
+                        obscure: true,
+                        textColor: textColor,
+                        hintColor: hintColor,
+                        fillColor: fieldFill,
+                        borderColor: borderColor,
+                        focusBorderColor: focusBorder,
+                      ),
+                      const SizedBox(height: 22),
+                      SizedBox(
+                        width: 290,
+                        height: 56,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(
+                                  isDark ? 0.28 : 0.12,
                                 ),
+                                blurRadius: 18,
+                                offset: const Offset(0, 8),
                               ),
                             ],
                           ),
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: primaryButtonColor,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: _isLoading ? null : _handleEmailAuth,
+                            child: Text(
+                              _isLoading
+                                  ? 'Please wait...'
+                                  : (_isCreateMode ? 'Create account' : 'Log in'),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                                setState(() {
+                                  _isCreateMode = !_isCreateMode;
+                                  _errorText = null;
+                                });
+                              },
+                        child: Text(
+                          _isCreateMode
+                              ? 'Already have an account? Log in'
+                              : 'Create account',
+                          style: TextStyle(
+                            color: subTextColor,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'or',
+                        style: TextStyle(
+                          color: subTextColor,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: 290,
+                        height: 58,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(
+                                  isDark ? 0.28 : 0.12,
+                                ),
+                                blurRadius: 18,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: primaryButtonColor,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 16,
+                              ),
+                            ),
+                            onPressed: _isLoading ? null : _handleGoogleSignIn,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                if (_isLoading)
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                else
+                                  const Icon(Icons.login_rounded, size: 24),
+                                const SizedBox(width: 12),
+                                Text(
+                                  _isLoading
+                                      ? 'Signing in...'
+                                      : 'Continue with Google',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_errorText != null) ...[
+                        const SizedBox(height: 18),
+                        Text(
+                          _errorText!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFFFF6B6B),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FlatField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final bool obscure;
+  final Color textColor;
+  final Color hintColor;
+  final Color fillColor;
+  final Color borderColor;
+  final Color focusBorderColor;
+
+  const _FlatField({
+    required this.controller,
+    required this.hint,
+    required this.obscure,
+    required this.textColor,
+    required this.hintColor,
+    required this.fillColor,
+    required this.borderColor,
+    required this.focusBorderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 54,
+      child: TextField(
+        controller: controller,
+        obscureText: obscure,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: textColor, fontSize: 18),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: hintColor),
+          filled: true,
+          fillColor: fillColor,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: borderColor),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: borderColor),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: focusBorderColor),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
           ),
         ),
       ),

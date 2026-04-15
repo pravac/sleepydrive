@@ -4,11 +4,13 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class JetsonAlert {
+  final String deviceId;
   final int level;
   final String message;
   final DateTime timestamp;
 
   JetsonAlert({
+    required this.deviceId,
     required this.level,
     required this.message,
     DateTime? timestamp,
@@ -170,12 +172,32 @@ class JetsonWebSocketService {
           final payload = _extractAlertPayload(decoded);
           if (payload == null) return null;
 
-          final level = _parseLevel(payload['level'] ?? payload['severity'] ?? payload['risk']);
-          final msg = _parseMessage(
-            payload['message'] ?? payload['alert'] ?? payload['text'] ?? payload['msg'],
+          final deviceId = payload['device_id']?.toString() ?? 'unknown';
+
+          final level = _parseLevel(
+            payload['level'] ?? payload['severity'] ?? payload['risk'],
           );
-          final ts = _parseTimestamp(payload['event_ts'] ?? payload['received_ts'] ?? payload['timestamp'] ?? payload['ts']);
-          return JetsonAlert(level: level, message: msg, timestamp: ts);
+
+          final msg = _parseMessage(
+            payload['message'] ??
+                payload['alert'] ??
+                payload['text'] ??
+                payload['msg'],
+          );
+
+          final ts = _parseTimestamp(
+            payload['event_ts'] ??
+                payload['received_ts'] ??
+                payload['timestamp'] ??
+                payload['ts'],
+          );
+
+          return JetsonAlert(
+            deviceId: deviceId,
+            level: level,
+            message: msg,
+            timestamp: ts,
+          );
         }
       } catch (_) {
         // If JSON parsing fails, continue with fallback parsing.
@@ -186,10 +208,21 @@ class JetsonWebSocketService {
     if (pipe > 0) {
       final level = _parseLevel(text.substring(0, pipe));
       final msg = text.substring(pipe + 1).trim();
-      return JetsonAlert(level: level, message: msg.isEmpty ? 'Alert' : msg, timestamp: DateTime.now());
+
+      return JetsonAlert(
+        deviceId: 'unknown',
+        level: level,
+        message: msg.isEmpty ? 'Alert' : msg,
+        timestamp: DateTime.now(),
+      );
     }
 
-    return JetsonAlert(level: 1, message: text, timestamp: DateTime.now());
+    return JetsonAlert(
+      deviceId: 'unknown',
+      level: 1,
+      message: text,
+      timestamp: DateTime.now(),
+    );
   }
 
   JetsonPresence? _parsePresence(dynamic raw) {
