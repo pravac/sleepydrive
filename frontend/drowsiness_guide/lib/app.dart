@@ -84,6 +84,7 @@ class _DriverSafetyAppState extends State<DriverSafetyApp> {
       ),
 
       routes: {
+        '/login': (context) => const LoginScreen(),
         '/dashboard': (context) => const LiveMonitorScreen(),
         '/drowsiness-detected': (context) => const DrowsinessDetectedScreen(),
         '/map': (context) => const OSMMapScreen(),

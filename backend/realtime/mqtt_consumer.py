@@ -105,6 +105,7 @@ class MQTTConsumer:
     async def _handle_message(self, topic: str, payload: bytes) -> None:
         presence = parse_presence_payload(topic=topic, payload=payload)
         if presence is not None:
+            await self._repository.upsert_presence(presence)
             await self._notify_presence(presence)
             log.info("Presence update: source=%s online=%s", presence.source_id, presence.online)
             return

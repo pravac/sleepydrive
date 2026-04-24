@@ -3,13 +3,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import secrets
 import sys
+import uuid
 from contextlib import asynccontextmanager
+from typing import Any
 
+import asyncpg
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from auth import AuthUser, require_firebase_user
 from db import Database
 from mqtt_consumer import MQTTConsumer
 from repository import AlertRepository
@@ -62,6 +67,30 @@ def _validate_device_query(device_id: str | None) -> str | None:
     if "\x00" in cleaned or len(cleaned) > 256:
         raise HTTPException(status_code=400, detail="Invalid device_id")
     return cleaned
+
+
+def _clean_optional_text(value: Any, max_chars: int = 256) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:max_chars]
+
+
+def _normalize_invite_code(value: Any) -> str | None:
+    text = _clean_optional_text(value, 64)
+    if text is None:
+        return None
+    return text.replace(" ", "").replace("-", "").upper()
+
+
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 async def _receive_within_limit(websocket: WebSocket, max_bytes: int) -> None:
@@ -139,6 +168,113 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    def _auth_user(authorization: str | None) -> AuthUser:
+        return require_firebase_user(
+            authorization=authorization,
+            project_id=settings.firebase_project_id,
+        )
+
+    async def _generate_invite_code(conn) -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        for _ in range(12):
+            code = "".join(secrets.choice(alphabet) for _ in range(8))
+            exists = await conn.fetchval(
+                "SELECT 1 FROM fleets WHERE invite_code = $1",
+                code,
+            )
+            if not exists:
+                return code
+        raise HTTPException(status_code=500, detail="Could not generate invite code")
+
+    async def _ensure_operator_fleet(conn, user: AuthUser, existing_fleet_id: str | None):
+        if existing_fleet_id:
+            fleet = await conn.fetchrow(
+                "SELECT id, name, owner_uid, invite_code FROM fleets WHERE id = $1",
+                existing_fleet_id,
+            )
+            if fleet is not None:
+                return fleet
+
+        fleet = await conn.fetchrow(
+            "SELECT id, name, owner_uid, invite_code FROM fleets WHERE owner_uid = $1",
+            user.uid,
+        )
+        if fleet is not None:
+            return fleet
+
+        fleet_id = str(uuid.uuid4())
+        invite_code = await _generate_invite_code(conn)
+        base_name = user.name or user.email or "SleepyDrive"
+        fleet_name = f"{base_name.split('@')[0]}'s Fleet"
+        return await conn.fetchrow(
+            """
+            INSERT INTO fleets (id, name, owner_uid, invite_code)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, name, owner_uid, invite_code
+            """,
+            fleet_id,
+            fleet_name[:256],
+            user.uid,
+            invite_code,
+        )
+
+    async def _profile_row(uid: str):
+        async with db.pool.acquire() as conn:
+            return await conn.fetchrow(
+                """
+                SELECT
+                    u.uid,
+                    u.role,
+                    u.email,
+                    u.display_name,
+                    u.fleet_id,
+                    u.device_id,
+                    f.name AS fleet_name,
+                    f.invite_code AS fleet_invite_code
+                FROM users u
+                LEFT JOIN fleets f ON f.id = u.fleet_id
+                WHERE u.uid = $1
+                """,
+                uid,
+            )
+
+    def _profile_response(row) -> dict[str, Any]:
+        return {
+            "uid": row["uid"],
+            "role": row["role"],
+            "email": row["email"],
+            "display_name": row["display_name"],
+            "fleet_id": row["fleet_id"],
+            "device_id": row["device_id"],
+            "fleet_name": row["fleet_name"],
+            "fleet_invite_code": row["fleet_invite_code"],
+        }
+
+    async def _require_current_profile(user: AuthUser) -> Any:
+        row = await _profile_row(user.uid)
+        if row is None:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        return row
+
+    async def _require_operator_profile(user: AuthUser) -> Any:
+        row = await _require_current_profile(user)
+        if row["role"] != "operator":
+            raise HTTPException(status_code=403, detail="Fleet operator role required")
+        if not row["fleet_id"]:
+            async with db.pool.acquire() as conn:
+                fleet = await _ensure_operator_fleet(conn, user, None)
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET fleet_id = $2, updated_at = NOW()
+                    WHERE uid = $1
+                    """,
+                    user.uid,
+                    fleet["id"],
+                )
+            row = await _profile_row(user.uid)
+        return row
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
@@ -165,41 +301,320 @@ def create_app() -> FastAPI:
         return {"count": len(events), "items": [event.as_dict() for event in events]}
 
     @app.post("/users")
-    async def create_user(data: dict) -> dict[str, str]:
-        uid = data.get("uid")
-        role = data.get("role")
+    async def create_user(
+        data: dict,
+        authorization: str | None = Header(None),
+    ) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        uid = _clean_optional_text(data.get("uid"), 256) or user.uid
+        role = _clean_optional_text(data.get("role"), 32)
 
-        if not uid or not role:
+        if uid != user.uid:
+            raise HTTPException(status_code=403, detail="Cannot edit another user profile")
+
+        if not role:
             raise HTTPException(status_code=400, detail="Missing uid or role")
 
         if role not in {"driver", "operator"}:
             raise HTTPException(status_code=400, detail="Invalid role")
 
         async with db.pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (uid, role)
-                VALUES ($1, $2)
-                ON CONFLICT (uid) DO UPDATE SET role = EXCLUDED.role
-                """,
-                uid,
-                role,
+            existing = await conn.fetchrow(
+                "SELECT fleet_id, device_id FROM users WHERE uid = $1",
+                user.uid,
             )
 
-        return {"status": "ok"}
+            email = _clean_optional_text(data.get("email") or user.email, 320)
+            display_name = _clean_optional_text(
+                data.get("display_name") or user.name or email,
+                256,
+            )
+            requested_device_id = _clean_optional_text(data.get("device_id"), 256)
+            device_id = requested_device_id
+            if role == "driver" and device_id is None and existing is not None:
+                device_id = existing["device_id"]
+            if role == "driver" and device_id is None:
+                device_id = user.uid
+
+            fleet_id = existing["fleet_id"] if existing is not None else None
+
+            if role == "driver":
+                invite_code = _normalize_invite_code(data.get("fleet_invite_code"))
+                if invite_code:
+                    fleet = await conn.fetchrow(
+                        "SELECT id FROM fleets WHERE invite_code = $1",
+                        invite_code,
+                    )
+                    if fleet is None:
+                        raise HTTPException(status_code=404, detail="Fleet invite code not found")
+                    fleet_id = fleet["id"]
+            else:
+                fleet = await _ensure_operator_fleet(conn, user, fleet_id)
+                fleet_id = fleet["id"]
+
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO users (
+                        uid,
+                        role,
+                        email,
+                        display_name,
+                        fleet_id,
+                        device_id
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (uid) DO UPDATE SET
+                        role = EXCLUDED.role,
+                        email = EXCLUDED.email,
+                        display_name = EXCLUDED.display_name,
+                        fleet_id = EXCLUDED.fleet_id,
+                        device_id = EXCLUDED.device_id,
+                        updated_at = NOW()
+                    """,
+                    user.uid,
+                    role,
+                    email,
+                    display_name,
+                    fleet_id,
+                    device_id,
+                )
+            except asyncpg.exceptions.UniqueViolationError as exc:
+                raise HTTPException(status_code=409, detail="Device ID is already assigned") from exc
+
+        row = await _profile_row(user.uid)
+        if row is None:
+            raise HTTPException(status_code=500, detail="User profile was not saved")
+        return _profile_response(row)
 
     @app.get("/users/{uid}")
-    async def get_user(uid: str) -> dict[str, str]:
-        async with db.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT uid, role FROM users WHERE uid = $1",
-                uid,
-            )
+    async def get_user(
+        uid: str,
+        authorization: str | None = Header(None),
+    ) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        row = await _profile_row(uid)
 
         if row is None:
             raise HTTPException(status_code=404, detail="User not found")
 
-        return {"uid": row["uid"], "role": row["role"]}
+        if uid != user.uid:
+            requester = await _require_operator_profile(user)
+            if row["role"] != "driver" or row["fleet_id"] != requester["fleet_id"]:
+                raise HTTPException(status_code=403, detail="Not allowed to view this profile")
+
+        return _profile_response(row)
+
+    @app.get("/me")
+    async def me(authorization: str | None = Header(None)) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        row = await _require_current_profile(user)
+        return _profile_response(row)
+
+    @app.get("/fleet")
+    async def get_fleet(authorization: str | None = Header(None)) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        row = await _require_operator_profile(user)
+        return {
+            "id": row["fleet_id"],
+            "name": row["fleet_name"],
+            "invite_code": row["fleet_invite_code"],
+        }
+
+    @app.post("/fleet/join")
+    async def join_fleet(
+        data: dict,
+        authorization: str | None = Header(None),
+    ) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        invite_code = _normalize_invite_code(data.get("fleet_invite_code"))
+        if not invite_code:
+            raise HTTPException(status_code=400, detail="Missing fleet invite code")
+
+        async with db.pool.acquire() as conn:
+            fleet = await conn.fetchrow(
+                "SELECT id FROM fleets WHERE invite_code = $1",
+                invite_code,
+            )
+            if fleet is None:
+                raise HTTPException(status_code=404, detail="Fleet invite code not found")
+
+            device_id = _clean_optional_text(data.get("device_id"), 256) or user.uid
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO users (uid, role, email, display_name, fleet_id, device_id)
+                    VALUES ($1, 'driver', $2, $3, $4, $5)
+                    ON CONFLICT (uid) DO UPDATE SET
+                        role = 'driver',
+                        email = COALESCE(users.email, EXCLUDED.email),
+                        display_name = COALESCE(users.display_name, EXCLUDED.display_name),
+                        fleet_id = EXCLUDED.fleet_id,
+                        device_id = EXCLUDED.device_id,
+                        updated_at = NOW()
+                    """,
+                    user.uid,
+                    user.email,
+                    user.name or user.email,
+                    fleet["id"],
+                    device_id,
+                )
+            except asyncpg.exceptions.UniqueViolationError as exc:
+                raise HTTPException(status_code=409, detail="Device ID is already assigned") from exc
+
+        row = await _profile_row(user.uid)
+        if row is None:
+            raise HTTPException(status_code=500, detail="User profile was not saved")
+        return _profile_response(row)
+
+    @app.get("/fleet/drivers")
+    async def fleet_drivers(authorization: str | None = Header(None)) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        operator = await _require_operator_profile(user)
+
+        async with db.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    u.uid,
+                    u.email,
+                    u.display_name,
+                    u.device_id,
+                    ds.online,
+                    ds.last_seen,
+                    ae.id AS alert_id,
+                    ae.level AS alert_level,
+                    ae.message AS alert_message,
+                    ae.event_ts AS alert_event_ts,
+                    ae.received_ts AS alert_received_ts
+                FROM users u
+                LEFT JOIN device_status ds ON ds.device_id = u.device_id
+                LEFT JOIN LATERAL (
+                    SELECT id, level, message, event_ts, received_ts
+                    FROM alert_events
+                    WHERE device_id = u.device_id
+                    ORDER BY received_ts DESC
+                    LIMIT 1
+                ) ae ON TRUE
+                WHERE u.role = 'driver' AND u.fleet_id = $1
+                ORDER BY
+                    COALESCE(ae.received_ts, ds.last_seen, u.updated_at) DESC,
+                    u.display_name ASC NULLS LAST,
+                    u.email ASC NULLS LAST
+                """,
+                operator["fleet_id"],
+            )
+
+        drivers: list[dict[str, Any]] = []
+        for row in rows:
+            latest_alert = None
+            if row["alert_id"] is not None:
+                latest_alert = {
+                    "id": row["alert_id"],
+                    "level": row["alert_level"],
+                    "message": row["alert_message"],
+                    "event_ts": _iso(row["alert_event_ts"]),
+                    "received_ts": _iso(row["alert_received_ts"]),
+                }
+
+            drivers.append(
+                {
+                    "uid": row["uid"],
+                    "email": row["email"],
+                    "display_name": row["display_name"],
+                    "device_id": row["device_id"],
+                    "online": bool(row["online"]) if row["online"] is not None else False,
+                    "last_seen": _iso(row["last_seen"]),
+                    "latest_alert": latest_alert,
+                },
+            )
+
+        return {
+            "fleet": {
+                "id": operator["fleet_id"],
+                "name": operator["fleet_name"],
+                "invite_code": operator["fleet_invite_code"],
+            },
+            "drivers": drivers,
+        }
+
+    def _alert_history_response(rows) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": row["id"],
+                "device_id": row["device_id"],
+                "level": row["level"],
+                "message": row["message"],
+                "event_ts": _iso(row["event_ts"]),
+                "received_ts": _iso(row["received_ts"]),
+                "metadata": row["metadata"] if isinstance(row["metadata"], dict) else {},
+            }
+            for row in rows
+        ]
+
+    @app.get("/me/alerts")
+    async def my_alerts(
+        limit: int = Query(default=50, ge=1, le=500),
+        authorization: str | None = Header(None),
+    ) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        profile = await _require_current_profile(user)
+        if profile["role"] != "driver":
+            raise HTTPException(status_code=403, detail="Driver role required")
+        if not profile["device_id"]:
+            return {"items": []}
+
+        async with db.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, device_id, level, message, event_ts, received_ts, metadata
+                FROM alert_events
+                WHERE device_id = $1
+                ORDER BY received_ts DESC
+                LIMIT $2
+                """,
+                profile["device_id"],
+                limit,
+            )
+        return {"items": _alert_history_response(rows)}
+
+    @app.get("/fleet/drivers/{driver_uid}/alerts")
+    async def fleet_driver_alerts(
+        driver_uid: str,
+        limit: int = Query(default=50, ge=1, le=500),
+        authorization: str | None = Header(None),
+    ) -> dict[str, Any]:
+        user = _auth_user(authorization)
+        operator = await _require_operator_profile(user)
+
+        async with db.pool.acquire() as conn:
+            driver = await conn.fetchrow(
+                """
+                SELECT uid, device_id
+                FROM users
+                WHERE uid = $1 AND role = 'driver' AND fleet_id = $2
+                """,
+                driver_uid,
+                operator["fleet_id"],
+            )
+            if driver is None:
+                raise HTTPException(status_code=404, detail="Fleet driver not found")
+            if not driver["device_id"]:
+                return {"items": []}
+
+            rows = await conn.fetch(
+                """
+                SELECT id, device_id, level, message, event_ts, received_ts, metadata
+                FROM alert_events
+                WHERE device_id = $1
+                ORDER BY received_ts DESC
+                LIMIT $2
+                """,
+                driver["device_id"],
+                limit,
+            )
+
+        return {"items": _alert_history_response(rows)}
 
     @app.websocket("/ws/alerts")
     async def ws_alerts(

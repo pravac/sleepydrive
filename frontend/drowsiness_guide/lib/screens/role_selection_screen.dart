@@ -22,9 +22,18 @@ class RoleSelectionScreen extends StatefulWidget {
 class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   final AuthService _authService = AuthService();
   final UserRoleService _userRoleService = UserRoleService();
+  final TextEditingController _fleetInviteCtrl = TextEditingController();
+  final TextEditingController _deviceIdCtrl = TextEditingController();
 
   bool _isLoading = false;
   String? _errorText;
+
+  @override
+  void dispose() {
+    _fleetInviteCtrl.dispose();
+    _deviceIdCtrl.dispose();
+    super.dispose();
+  }
 
   Future<User> _ensureAuthenticatedUser() async {
     final existingUser = FirebaseAuth.instance.currentUser;
@@ -62,6 +71,15 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   String _friendlyError(Object error) {
     if (error is UserRoleServiceException) {
+      if (error.statusCode == 404 && error.message.contains('invite')) {
+        return 'That fleet invite code was not found.';
+      }
+      if (error.statusCode == 401) {
+        return 'Your sign-in session expired. Please go back and try again.';
+      }
+      if (error.statusCode == 409 && error.message.contains('Device ID')) {
+        return 'That Jetson device ID is already assigned to another driver.';
+      }
       return 'Your account was created, but the app could not save your role. Please try again.';
     }
     if (error is FirebaseAuthException) {
@@ -87,6 +105,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   Future<void> _saveRoleAndRoute({
     required String role,
+    String? fleetInviteCode,
+    String? deviceId,
   }) async {
     setState(() {
       _isLoading = true;
@@ -95,7 +115,14 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
     try {
       final user = await _ensureAuthenticatedUser();
-      await _userRoleService.saveRole(uid: user.uid, role: role);
+      await _userRoleService.saveRole(
+        uid: user.uid,
+        role: role,
+        email: user.email ?? widget.email,
+        displayName: user.displayName,
+        fleetInviteCode: fleetInviteCode,
+        deviceId: deviceId,
+      );
 
       if (!mounted) return;
 
@@ -128,6 +155,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   Future<void> _handleDriverSelection() async {
     await _saveRoleAndRoute(
       role: 'driver',
+      fleetInviteCode: _fleetInviteCtrl.text,
+      deviceId: _deviceIdCtrl.text,
     );
   }
 
@@ -179,79 +208,99 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
               constraints: const BoxConstraints(maxWidth: 460),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'BLINK',
-                      style: GoogleFonts.megrim(
-                        fontSize: 44,
-                        letterSpacing: 10,
-                        color: textColor,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'BLINK',
+                        style: GoogleFonts.megrim(
+                          fontSize: 44,
+                          letterSpacing: 10,
+                          color: textColor,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      FirebaseAuth.instance.currentUser == null
-                          ? "Select how you'll use the platform"
-                          : "Finish setting up your account",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: subTextColor,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 34),
-                    _RoleCard(
-                      title: 'Fleet Driver',
-                      subtitle:
-                          'Receive fatigue alerts and access your live monitoring tools.',
-                      icon: Icons.drive_eta_rounded,
-                      cardColor: cardColor,
-                      borderColor: borderColor,
-                      textColor: textColor,
-                      accentColor: primaryColor,
-                      onTap: _isLoading ? null : _handleDriverSelection,
-                    ),
-                    const SizedBox(height: 18),
-                    _RoleCard(
-                      title: 'Fleet Operator',
-                      subtitle:
-                          'Monitor drivers, review alerts, and manage your fleet dashboard.',
-                      icon: Icons.dashboard_customize_rounded,
-                      cardColor: cardColor,
-                      borderColor: borderColor,
-                      textColor: textColor,
-                      accentColor: primaryColor,
-                      onTap: _isLoading ? null : _handleOperatorSelection,
-                    ),
-                    if (_isLoading) ...[
-                      const SizedBox(height: 22),
-                      const CircularProgressIndicator(),
-                    ],
-                    if (_errorText != null) ...[
                       const SizedBox(height: 18),
                       Text(
-                        _errorText!,
+                        FirebaseAuth.instance.currentUser == null
+                            ? "Select how you'll use the platform"
+                            : "Finish setting up your account",
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Color(0xFFFF6B6B),
-                          fontSize: 14,
+                        style: TextStyle(
+                          color: subTextColor,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 34),
+                      _SetupField(
+                        controller: _fleetInviteCtrl,
+                        hint: 'fleet invite code',
+                        textColor: textColor,
+                        hintColor: subTextColor,
+                        fillColor: cardColor,
+                        borderColor: borderColor,
+                      ),
+                      const SizedBox(height: 12),
+                      _SetupField(
+                        controller: _deviceIdCtrl,
+                        hint: 'Jetson device ID',
+                        textColor: textColor,
+                        hintColor: subTextColor,
+                        fillColor: cardColor,
+                        borderColor: borderColor,
+                      ),
+                      const SizedBox(height: 18),
+                      _RoleCard(
+                        title: 'Fleet Driver',
+                        subtitle:
+                            'Receive fatigue alerts and access your live monitoring tools.',
+                        icon: Icons.drive_eta_rounded,
+                        cardColor: cardColor,
+                        borderColor: borderColor,
+                        textColor: textColor,
+                        accentColor: primaryColor,
+                        onTap: _isLoading ? null : _handleDriverSelection,
+                      ),
+                      const SizedBox(height: 18),
+                      _RoleCard(
+                        title: 'Fleet Operator',
+                        subtitle:
+                            'Monitor drivers, review alerts, and manage your fleet dashboard.',
+                        icon: Icons.dashboard_customize_rounded,
+                        cardColor: cardColor,
+                        borderColor: borderColor,
+                        textColor: textColor,
+                        accentColor: primaryColor,
+                        onTap: _isLoading ? null : _handleOperatorSelection,
+                      ),
+                      if (_isLoading) ...[
+                        const SizedBox(height: 22),
+                        const CircularProgressIndicator(),
+                      ],
+                      if (_errorText != null) ...[
+                        const SizedBox(height: 18),
+                        Text(
+                          _errorText!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFFFF6B6B),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      TextButton(
+                        onPressed: _isLoading ? null : _handleBack,
+                        child: Text(
+                          'Back',
+                          style: TextStyle(
+                            color: subTextColor,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 24),
-                    TextButton(
-                      onPressed: _isLoading ? null : _handleBack,
-                      child: Text(
-                        'Back',
-                        style: TextStyle(
-                          color: subTextColor,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -352,6 +401,55 @@ class _RoleCard extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SetupField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hint;
+  final Color textColor;
+  final Color hintColor;
+  final Color fillColor;
+  final Color borderColor;
+
+  const _SetupField({
+    required this.controller,
+    required this.hint,
+    required this.textColor,
+    required this.hintColor,
+    required this.fillColor,
+    required this.borderColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      style: TextStyle(color: textColor),
+      textCapitalization: TextCapitalization.characters,
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: hintColor),
+        filled: true,
+        fillColor: fillColor,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: textColor.withOpacity(0.28)),
         ),
       ),
     );

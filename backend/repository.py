@@ -8,7 +8,7 @@ from typing import Any
 import asyncpg
 
 from db import Database
-from schemas import AlertEvent
+from schemas import AlertEvent, JetsonPresence
 
 log = logging.getLogger("realtime.repository")
 
@@ -97,6 +97,33 @@ class AlertRepository:
                 safe_limit,
             )
         return [self._row_to_event(row) for row in rows]
+
+    async def upsert_presence(self, presence: JetsonPresence) -> None:
+        await self._db.pool.execute(
+            """
+            INSERT INTO device_status (
+                device_id,
+                online,
+                last_seen,
+                source,
+                topic,
+                metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+            ON CONFLICT (device_id) DO UPDATE SET
+                online = EXCLUDED.online,
+                last_seen = EXCLUDED.last_seen,
+                source = EXCLUDED.source,
+                topic = EXCLUDED.topic,
+                metadata = EXCLUDED.metadata
+            """,
+            presence.source_id,
+            presence.online,
+            presence.event_ts,
+            presence.source,
+            presence.topic,
+            json.dumps(presence.metadata, ensure_ascii=False, separators=(",", ":")),
+        )
 
     @staticmethod
     def _row_to_event(row: Any) -> AlertEvent:
