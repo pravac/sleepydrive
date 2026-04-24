@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT,
     display_name TEXT,
     fleet_id TEXT,
-    device_id TEXT UNIQUE,
+    device_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -80,9 +80,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS fleet_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS device_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_device_id_unique
-ON users (device_id)
-WHERE device_id IS NOT NULL;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_device_id_key;
+DROP INDEX IF EXISTS idx_users_device_id_unique;
 """
 
 SCHEMA_SQL = """

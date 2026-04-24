@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drowsiness_guide/app.dart';
@@ -68,20 +69,22 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     if (!mounted) return;
 
     setState(() {
-      final entry = _entryForDevice(alert.deviceId);
-      if (entry == null) return;
+      final entries = _entriesForDevice(alert.deviceId);
+      if (entries.isEmpty) return;
 
       final updatedRisk = _riskFromLevel(alert.level);
       final updatedStatus = _statusFromRisk(updatedRisk);
 
-      _driversByUid[entry.key] = entry.value.copyWith(
-        risk: updatedRisk,
-        status: updatedStatus,
-        isOnline: true,
-        hasFatigueData: true,
-        lastAlert: alert.message,
-        lastUpdated: alert.timestamp,
-      );
+      for (final entry in entries) {
+        _driversByUid[entry.key] = entry.value.copyWith(
+          risk: updatedRisk,
+          status: updatedStatus,
+          isOnline: true,
+          hasFatigueData: true,
+          lastAlert: alert.message,
+          lastUpdated: alert.timestamp,
+        );
+      }
     });
   }
 
@@ -89,13 +92,15 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     if (!mounted) return;
 
     setState(() {
-      final entry = _entryForDevice(presence.sourceId);
-      if (entry == null) return;
+      final entries = _entriesForDevice(presence.sourceId);
+      if (entries.isEmpty) return;
 
-      _driversByUid[entry.key] = entry.value.copyWith(
-        isOnline: presence.online,
-        lastUpdated: presence.timestamp,
-      );
+      for (final entry in entries) {
+        _driversByUid[entry.key] = entry.value.copyWith(
+          isOnline: presence.online,
+          lastUpdated: presence.timestamp,
+        );
+      }
     });
   }
 
@@ -118,13 +123,14 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     return list;
   }
 
-  MapEntry<String, _DriverData>? _entryForDevice(String deviceId) {
+  List<MapEntry<String, _DriverData>> _entriesForDevice(String deviceId) {
+    final matches = <MapEntry<String, _DriverData>>[];
     for (final entry in _driversByUid.entries) {
       if (entry.value.deviceId == deviceId) {
-        return entry;
+        matches.add(entry);
       }
     }
-    return null;
+    return matches;
   }
 
   Future<void> _loadFleetDrivers() async {
@@ -135,22 +141,25 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
 
     try {
       final data = await _userRoleService.fetchFleetDashboard();
-      if (!mounted) return;
-
-      setState(() {
-        _fleetName = data.fleet.name;
-        _fleetInviteCode = data.fleet.inviteCode;
-        _driversByUid
-          ..clear()
-          ..addEntries(
-            data.drivers.map(
-              (driver) => MapEntry(
-                driver.uid,
-                _DriverData.fromFleetDriver(driver),
-              ),
-            ),
-          );
-      });
+      _applyFleetDashboardData(data);
+    } on UserRoleServiceException catch (e) {
+      if (e.statusCode == 403 && e.message.contains('operator')) {
+        try {
+          await _ensureOperatorProfile();
+          final data = await _userRoleService.fetchFleetDashboard();
+          _applyFleetDashboardData(data);
+        } catch (retryError) {
+          if (!mounted) return;
+          setState(() {
+            _fleetLoadError = retryError.toString().replaceFirst('Exception: ', '');
+          });
+        }
+      } else {
+        if (!mounted) return;
+        setState(() {
+          _fleetLoadError = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -163,6 +172,39 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
         });
       }
     }
+  }
+
+  Future<void> _ensureOperatorProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const UserRoleServiceException('No authenticated Firebase user');
+    }
+
+    await _userRoleService.saveRole(
+      uid: user.uid,
+      role: 'operator',
+      email: user.email,
+      displayName: user.displayName,
+    );
+  }
+
+  void _applyFleetDashboardData(FleetDashboardData data) {
+    if (!mounted) return;
+
+    setState(() {
+      _fleetName = data.fleet.name;
+      _fleetInviteCode = data.fleet.inviteCode;
+      _driversByUid
+        ..clear()
+        ..addEntries(
+          data.drivers.map(
+            (driver) => MapEntry(
+              driver.uid,
+              _DriverData.fromFleetDriver(driver),
+            ),
+          ),
+        );
+    });
   }
 
   Future<void> _backToLogin() async {

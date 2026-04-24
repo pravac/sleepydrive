@@ -8,8 +8,6 @@ import sys
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
-
-import asyncpg
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -352,35 +350,32 @@ def create_app() -> FastAPI:
                 fleet = await _ensure_operator_fleet(conn, user, fleet_id)
                 fleet_id = fleet["id"]
 
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO users (
-                        uid,
-                        role,
-                        email,
-                        display_name,
-                        fleet_id,
-                        device_id
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT (uid) DO UPDATE SET
-                        role = EXCLUDED.role,
-                        email = EXCLUDED.email,
-                        display_name = EXCLUDED.display_name,
-                        fleet_id = EXCLUDED.fleet_id,
-                        device_id = EXCLUDED.device_id,
-                        updated_at = NOW()
-                    """,
-                    user.uid,
+            await conn.execute(
+                """
+                INSERT INTO users (
+                    uid,
                     role,
                     email,
                     display_name,
                     fleet_id,
-                    device_id,
+                    device_id
                 )
-            except asyncpg.exceptions.UniqueViolationError as exc:
-                raise HTTPException(status_code=409, detail="Device ID is already assigned") from exc
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (uid) DO UPDATE SET
+                    role = EXCLUDED.role,
+                    email = EXCLUDED.email,
+                    display_name = EXCLUDED.display_name,
+                    fleet_id = EXCLUDED.fleet_id,
+                    device_id = EXCLUDED.device_id,
+                    updated_at = NOW()
+                """,
+                user.uid,
+                role,
+                email,
+                display_name,
+                fleet_id,
+                device_id,
+            )
 
         row = await _profile_row(user.uid)
         if row is None:
@@ -440,27 +435,24 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=404, detail="Fleet invite code not found")
 
             device_id = _clean_optional_text(data.get("device_id"), 256) or user.uid
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO users (uid, role, email, display_name, fleet_id, device_id)
-                    VALUES ($1, 'driver', $2, $3, $4, $5)
-                    ON CONFLICT (uid) DO UPDATE SET
-                        role = 'driver',
-                        email = COALESCE(users.email, EXCLUDED.email),
-                        display_name = COALESCE(users.display_name, EXCLUDED.display_name),
-                        fleet_id = EXCLUDED.fleet_id,
-                        device_id = EXCLUDED.device_id,
-                        updated_at = NOW()
-                    """,
-                    user.uid,
-                    user.email,
-                    user.name or user.email,
-                    fleet["id"],
-                    device_id,
-                )
-            except asyncpg.exceptions.UniqueViolationError as exc:
-                raise HTTPException(status_code=409, detail="Device ID is already assigned") from exc
+            await conn.execute(
+                """
+                INSERT INTO users (uid, role, email, display_name, fleet_id, device_id)
+                VALUES ($1, 'driver', $2, $3, $4, $5)
+                ON CONFLICT (uid) DO UPDATE SET
+                    role = 'driver',
+                    email = COALESCE(users.email, EXCLUDED.email),
+                    display_name = COALESCE(users.display_name, EXCLUDED.display_name),
+                    fleet_id = EXCLUDED.fleet_id,
+                    device_id = EXCLUDED.device_id,
+                    updated_at = NOW()
+                """,
+                user.uid,
+                user.email,
+                user.name or user.email,
+                fleet["id"],
+                device_id,
+            )
 
         row = await _profile_row(user.uid)
         if row is None:

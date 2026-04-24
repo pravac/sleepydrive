@@ -77,9 +77,6 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       if (error.statusCode == 401) {
         return 'Your sign-in session expired. Please go back and try again.';
       }
-      if (error.statusCode == 409 && error.message.contains('Device ID')) {
-        return 'That Jetson device ID is already assigned to another driver.';
-      }
       return 'Your account was created, but the app could not save your role. Please try again.';
     }
     if (error is FirebaseAuthException) {
