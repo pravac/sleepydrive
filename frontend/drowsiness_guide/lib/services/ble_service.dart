@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 /// UUIDs must match the Jetson's config.py
 const _serviceUuid = "12345678-1234-5678-1234-56789abcdef0";
-const _charUuid    = "12345678-1234-5678-1234-56789abcdef1";
-const _deviceName  = "SleepyDrive";
+const _charUuid = "12345678-1234-5678-1234-56789abcdef1";
+const _deviceName = "SleepyDrive";
+
+enum _ScanMode { serviceOrName, keyword }
 
 /// A parsed alert from the Jetson BLE server.
 class BleAlert {
@@ -47,9 +50,16 @@ class BleService {
   String _currentState = 'Disconnected';
   String get currentState => _currentState;
 
+  // Auto-reconnect state: true while we own a connection attempt.
+  // Set false only during explicit disconnect().
+  bool _autoReconnect = false;
+  bool _disposed = false;
+  Timer? _reconnectTimer;
+
   void _setState(String s) {
     _currentState = s;
     _stateCtrl.add(s);
+    debugPrint('[BLE] state → $s');
   }
 
   bool _matchesExpectedName(String name) {
@@ -64,10 +74,98 @@ class BleService {
     return advName.isNotEmpty && _matchesExpectedName(advName);
   }
 
+  Future<bool> _ensureBlePermissions() async {
+    if (kIsWeb) {
+      return true;
+    }
+
+    final permissions = <Permission>[];
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        permissions.addAll([
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+          Permission.locationWhenInUse,
+        ]);
+        break;
+      case TargetPlatform.iOS:
+        permissions.add(Permission.bluetooth);
+        break;
+      default:
+        return true;
+    }
+
+    final statuses = await permissions.request();
+    return statuses.values.every((status) => status.isGranted);
+  }
+
+  Future<BluetoothDevice?> _scanForSleepyDrive(_ScanMode mode) async {
+    BluetoothDevice? found;
+    Object? scanError;
+    final scanSub = FlutterBluePlus.onScanResults.listen(
+      (results) {
+        for (final r in results) {
+          if (_matchesDevice(r)) {
+            found = r.device;
+          }
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        scanError = error;
+      },
+    );
+
+    try {
+      final services = mode == _ScanMode.serviceOrName
+          ? [Guid(_serviceUuid)]
+          : <Guid>[];
+      final names = mode == _ScanMode.serviceOrName
+          ? [_deviceName]
+          : <String>[];
+      final keywords = mode == _ScanMode.keyword
+          ? [_deviceName]
+          : <String>[];
+      await FlutterBluePlus.startScan(
+        withServices: services,
+        withNames: names,
+        withKeywords: keywords,
+        timeout: const Duration(seconds: 8),
+        androidUsesFineLocation: true,
+        androidCheckLocationServices: false,
+      );
+      await FlutterBluePlus.isScanning
+          .where((isScanning) => isScanning == false)
+          .first
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      scanError ??= e;
+    } finally {
+      await scanSub.cancel();
+    }
+
+    if (scanError != null) {
+      throw scanError!;
+    }
+    return found;
+  }
+
   /// Scan for the SleepyDrive device and connect.
+  /// Set [autoReconnect] to false only when called from an explicit
+  /// user-initiated retry; the internal reconnect path always leaves it true.
   Future<void> scanAndConnect() async {
+    if (_disposed) return;
+    _autoReconnect = true;
+    _reconnectTimer?.cancel();
+
     if (!await FlutterBluePlus.isSupported) {
       _setState('BLE unsupported');
+      return;
+    }
+
+    if (!await _ensureBlePermissions()) {
+      _setState('Bluetooth permission denied');
+      await Future.delayed(const Duration(seconds: 2));
+      _setState('Disconnected');
       return;
     }
 
@@ -100,41 +198,16 @@ class BleService {
 
     _setState('Scanning…');
 
-    // Listen for scan results
     BluetoothDevice? found;
-    Object? scanError;
-    final scanSub = FlutterBluePlus.onScanResults.listen(
-      (results) {
-        for (final r in results) {
-          if (_matchesDevice(r)) {
-            found = r.device;
-          }
-        }
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        scanError = error;
-      },
-    );
-
     try {
-      await FlutterBluePlus.startScan(
-        withServices: [Guid(_serviceUuid)],
-        timeout: const Duration(seconds: 8),
-      );
-      await FlutterBluePlus.isScanning
-          .where((isScanning) => isScanning == false)
-          .first
-          .timeout(const Duration(seconds: 10));
+      found = await _scanForSleepyDrive(_ScanMode.serviceOrName);
+      found ??= await _scanForSleepyDrive(_ScanMode.keyword);
     } catch (e) {
-      scanError ??= e;
-    } finally {
-      await scanSub.cancel();
-    }
-
-    if (scanError != null) {
+      debugPrint('[BLE] scan error: $e');
       _setState('Scan failed');
       await Future.delayed(const Duration(seconds: 2));
       _setState('Disconnected');
+      _scheduleReconnect();
       return;
     }
 
@@ -158,45 +231,80 @@ class BleService {
       _setState('Not found');
       await Future.delayed(const Duration(seconds: 2));
       _setState('Disconnected');
+      _scheduleReconnect();
       return;
     }
 
     _setState('Connecting…');
 
     try {
-      await found!.connect(timeout: const Duration(seconds: 10));
+      await found.connect(timeout: const Duration(seconds: 10));
       _device = found;
 
-      // Listen for disconnection
-      _connSub = found!.connectionState.listen((state) {
+      // Listen for disconnection — trigger auto-reconnect if we own the session.
+      _connSub?.cancel();
+      _connSub = found.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
-          _setState('Disconnected');
           _notifySub?.cancel();
+          _notifySub = null;
+          _setState('Disconnected');
+          _scheduleReconnect();
         }
       });
 
       _setState('Connected');
 
-      // Discover services and subscribe
-      final services = await found!.discoverServices();
+      // Discover services and subscribe to the alert characteristic.
+      final services = await found.discoverServices();
+      bool subscribed = false;
       for (final svc in services) {
         if (svc.uuid.toString().toLowerCase() == _serviceUuid) {
           for (final ch in svc.characteristics) {
             if (ch.uuid.toString().toLowerCase() == _charUuid) {
+              if (!ch.properties.notify) {
+                debugPrint('[BLE] characteristic found but notify not supported');
+                _setState('Connected (notify unsupported)');
+                return;
+              }
               await ch.setNotifyValue(true);
-              _notifySub = ch.onValueReceived.listen(_onData);
+              await _notifySub?.cancel();
+              _notifySub = ch.lastValueStream.listen(_onData);
+              try {
+                await ch.read();
+              } catch (e) {
+                debugPrint('[BLE] initial characteristic read failed: $e');
+              }
+              subscribed = true;
+              debugPrint('[BLE] subscribed to alert characteristic');
               return;
             }
           }
         }
       }
-      // If we get here, service/char not found
-      _setState('Connected (no alert service)');
+      if (!subscribed) {
+        debugPrint('[BLE] connected but alert service/characteristic not found');
+        _setState('Connected (no alert service)');
+      }
     } catch (e) {
+      debugPrint('[BLE] connection error: $e');
       _setState('Connection failed');
       await Future.delayed(const Duration(seconds: 2));
       _setState('Disconnected');
+      _scheduleReconnect();
     }
+  }
+
+  /// Schedule a reconnection attempt after a short backoff, unless we were
+  /// explicitly disconnected by the user.
+  void _scheduleReconnect() {
+    if (!_autoReconnect || _disposed) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (_autoReconnect && !_disposed && _currentState == 'Disconnected') {
+        debugPrint('[BLE] auto-reconnecting…');
+        scanAndConnect();
+      }
+    });
   }
 
   void _onData(List<int> raw) {
@@ -204,19 +312,26 @@ class BleService {
       final text = utf8.decode(raw);
       // Format: "<level>|<message>"
       final pipe = text.indexOf('|');
-      if (pipe < 0) return;
+      if (pipe < 0) {
+        debugPrint('[BLE] malformed packet (no pipe): $text');
+        return;
+      }
       final level = int.tryParse(text.substring(0, pipe)) ?? 0;
       final message = text.substring(pipe + 1);
       _alertCtrl.add(BleAlert(level: level, message: message));
-    } catch (_) {
-      // ignore malformed data
+    } catch (e) {
+      debugPrint('[BLE] failed to decode packet: $e');
     }
   }
 
-  /// Disconnect from the current device.
+  /// Disconnect from the current device. Disables auto-reconnect.
   Future<void> disconnect() async {
+    _autoReconnect = false;
+    _reconnectTimer?.cancel();
     await _notifySub?.cancel();
+    _notifySub = null;
     await _connSub?.cancel();
+    _connSub = null;
     await _device?.disconnect();
     _device = null;
     _setState('Disconnected');
@@ -224,6 +339,9 @@ class BleService {
 
   /// Clean up resources.
   void dispose() {
+    _disposed = true;
+    _autoReconnect = false;
+    _reconnectTimer?.cancel();
     _notifySub?.cancel();
     _connSub?.cancel();
     _alertCtrl.close();

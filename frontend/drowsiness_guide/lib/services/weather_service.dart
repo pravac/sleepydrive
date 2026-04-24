@@ -30,17 +30,24 @@ class WeatherService {
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     final weather0 = (data['weather'] as List).isNotEmpty ? data['weather'][0] : {};
     final main = data['main'] as Map<String, dynamic>;
+    final city = (data['name'] as String?)?.trim();
 
     return WeatherResult(
-      condition: (weather0['main'] ?? 'Unknown') as String, 
+      city: city == null || city.isEmpty ? null : city,
+      condition: (weather0['main'] ?? 'Unknown') as String,
       temperature: (main['temp'] as num).toDouble(),
     );
   }
 }
 
 class WeatherResult {
+  final String? city;
   final String condition;
   final double temperature;
 
-  const WeatherResult({required this.condition, required this.temperature});
+  const WeatherResult({
+    required this.city,
+    required this.condition,
+    required this.temperature,
+  });
 }

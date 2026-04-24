@@ -31,8 +31,10 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
     'JETSON_WS_URL',
     defaultValue: 'ws://localhost:8080/ws/alerts?replay=0',
   );
-  String? _latText;
-  String? _lonText;
+  static const int _fatigueRiskResetValue = 100;
+  static const int _fatigueRiskStep = 10;
+
+  String? _cityText;
   String? _locErr;
 
   String? _weatherCondition;
@@ -59,6 +61,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
 
   String _latestAlertLevel = 'None';
   String _jetsonDeviceState = 'Offline';
+  int _fatigueRisk = _fatigueRiskResetValue;
   DateTime? _jetsonLastSeen;
   final List<_DashboardAlert> _alerts = [];
   static const Duration _jetsonStaleAfter = Duration(seconds: 30);
@@ -66,6 +69,13 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   bool _wsIsConnected(String s) => s == 'Connected';
   bool _wsIsBusy(String s) =>
       s.startsWith('Connecting…') || s.startsWith('Reconnecting…');
+
+  String get _fatigueRiskStatus {
+    if (_fatigueRisk >= 70) return 'Normal';
+    if (_fatigueRisk >= 40) return 'Warning';
+    if (_fatigueRisk >= 10) return 'High';
+    return 'Critical';
+  }
 
   @override
   void initState() {
@@ -88,6 +98,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
         source: 'BLE',
       );
     });
+    unawaited(_ble.scanAndConnect());
 
     // Listen for Jetson WebSocket status + alerts
     _jetsonWsStateSub = _jetsonWs.connectionState.listen((state) {
@@ -143,6 +154,10 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
     if (!mounted) return;
     setState(() {
       _latestAlertLevel = levelLabel;
+      _fatigueRisk = (_fatigueRisk - _fatigueRiskStep).clamp(
+        0,
+        _fatigueRiskResetValue,
+      ).toInt();
       _alerts.insert(
         0,
         _DashboardAlert(
@@ -169,7 +184,11 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
     if (!mounted) return;
     setState(() {
       _jetsonLastSeen = presence.timestamp;
-      _jetsonDeviceState = presence.online ? 'Online' : 'Offline';
+      final nextState = presence.online ? 'Online' : 'Offline';
+      if (_jetsonDeviceState != nextState && nextState == 'Offline') {
+        _fatigueRisk = _fatigueRiskResetValue;
+      }
+      _jetsonDeviceState = nextState;
     });
   }
 
@@ -183,6 +202,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
           DateTime.now().difference(lastSeen) > _jetsonStaleAfter;
       if (stale && _jetsonDeviceState != 'Offline') {
         setState(() {
+          _fatigueRisk = _fatigueRiskResetValue;
           _jetsonDeviceState = 'Offline';
         });
       }
@@ -221,9 +241,9 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   void _onBluetoothTap() async {
     if (_bleState == 'Connected') {
       await _ble.disconnect();
-    } else if (_bleState == 'Disconnected' ||
-        _bleState == 'Not found' ||
-        _bleState == 'Connection failed') {
+    } else if (_bleState != 'Scanning…' &&
+        _bleState != 'Connecting…' &&
+        _bleState != 'Waiting for Bluetooth…') {
       await _ble.scanAndConnect();
     }
   }
@@ -249,8 +269,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
       if (!mounted) return;
 
       setState(() {
-        _latText = pos.latitude.toStringAsFixed(5);
-        _lonText = pos.longitude.toStringAsFixed(5);
+        _cityText = null;
         _locErr = null;
       });
 
@@ -259,8 +278,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
       if (!mounted) return;
       setState(() {
         _locErr = e.toString();
-        _latText = null;
-        _lonText = null;
+        _cityText = null;
         _weatherCondition = null;
         _tempText = null;
         _weatherErr = null;
@@ -268,6 +286,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
       });
     }
   }
+
   Future<void> _backToLogin() async {
     await AuthService().signOut();
 
@@ -296,6 +315,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
 
       if (!mounted) return;
       setState(() {
+        _cityText = w.city;
         _weatherCondition = w.condition;
         _tempText = '${w.temperature.round()}°F';
         _weatherErr = null;
@@ -319,8 +339,6 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
     final iconColor = isDark ? Colors.white : Colors.black;
     const driverId = "Sluggish Driver";
     const vehicle = "SlugMobile";
-    const fatigueRisk = 42;
-    const status = "Normal";
 
     return Scaffold(
       backgroundColor: bgTop,
@@ -370,7 +388,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
           ),
           IconButton(
             onPressed: _loadLocationOnce,
-            icon:  Icon(Icons.my_location, color: iconColor),
+            icon: Icon(Icons.my_location, color: iconColor),
           ),
           IconButton(
             onPressed: _backToLogin,
@@ -393,7 +411,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
             children: [
               _HeaderCard(driverId: driverId, vehicle: vehicle),
               const SizedBox(height: 12),
-              _RiskCard(value: fatigueRisk, label: status),
+              _RiskCard(value: _fatigueRisk, label: _fatigueRiskStatus),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 10,
@@ -405,19 +423,11 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
                     label: "Jetson Device",
                     value: _jetsonDeviceState,
                   ),
-                  const _StatusChip(label: "Face", value: "Detected"),
-                  const _StatusChip(label: "Eyes", value: "Open"),
                   _StatusChip(label: "Alert", value: _latestAlertLevel),
                   _StatusChip(
-                    label: "Lat",
+                    label: "City",
                     value:
-                        _latText ??
-                        (_locErr == null ? "Loading…" : "Unavailable"),
-                  ),
-                  _StatusChip(
-                    label: "Lon",
-                    value:
-                        _lonText ??
+                        _cityText ??
                         (_locErr == null ? "Loading…" : "Unavailable"),
                   ),
                   _StatusChip(
