@@ -318,9 +318,12 @@ def create_app() -> FastAPI:
 
         async with db.pool.acquire() as conn:
             existing = await conn.fetchrow(
-                "SELECT fleet_id, device_id FROM users WHERE uid = $1",
+                "SELECT role, fleet_id, device_id FROM users WHERE uid = $1",
                 user.uid,
             )
+
+            if existing is not None and existing["role"] != role:
+                raise HTTPException(status_code=409, detail="Cannot change role once set")
 
             email = _clean_optional_text(data.get("email") or user.email, 320)
             display_name = _clean_optional_text(

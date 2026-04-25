@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:drowsiness_guide/app.dart';
@@ -143,23 +142,10 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
       final data = await _userRoleService.fetchFleetDashboard();
       _applyFleetDashboardData(data);
     } on UserRoleServiceException catch (e) {
-      if (e.statusCode == 403 && e.message.contains('operator')) {
-        try {
-          await _ensureOperatorProfile();
-          final data = await _userRoleService.fetchFleetDashboard();
-          _applyFleetDashboardData(data);
-        } catch (retryError) {
-          if (!mounted) return;
-          setState(() {
-            _fleetLoadError = retryError.toString().replaceFirst('Exception: ', '');
-          });
-        }
-      } else {
-        if (!mounted) return;
-        setState(() {
-          _fleetLoadError = e.toString().replaceFirst('Exception: ', '');
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _fleetLoadError = e.toString().replaceFirst('Exception: ', '');
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -172,20 +158,6 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
         });
       }
     }
-  }
-
-  Future<void> _ensureOperatorProfile() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      throw const UserRoleServiceException('No authenticated Firebase user');
-    }
-
-    await _userRoleService.saveRole(
-      uid: user.uid,
-      role: 'operator',
-      email: user.email,
-      displayName: user.displayName,
-    );
   }
 
   void _applyFleetDashboardData(FleetDashboardData data) {
