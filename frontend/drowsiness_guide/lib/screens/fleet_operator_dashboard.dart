@@ -71,13 +71,11 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
       final entries = _entriesForDevice(alert.deviceId);
       if (entries.isEmpty) return;
 
-      final updatedRisk = _riskFromLevel(alert.level);
-      final updatedStatus = _statusFromRisk(updatedRisk);
-
       for (final entry in entries) {
+        final updatedRisk = (entry.value.risk + 10).clamp(0, 100);
         _driversByUid[entry.key] = entry.value.copyWith(
           risk: updatedRisk,
-          status: updatedStatus,
+          status: _statusFromRiskValue(updatedRisk),
           isOnline: true,
           hasFatigueData: true,
           lastAlert: alert.message,
@@ -95,20 +93,24 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
       if (entries.isEmpty) return;
 
       for (final entry in entries) {
-        _driversByUid[entry.key] = entry.value.copyWith(
-          isOnline: presence.online,
-          lastUpdated: presence.timestamp,
-        );
+        final wasOffline = !entry.value.isOnline;
+        if (presence.online && wasOffline) {
+          _driversByUid[entry.key] = entry.value.copyWith(
+            isOnline: true,
+            risk: 0,
+            status: 'No data',
+            hasFatigueData: false,
+            lastAlert: null,
+            lastUpdated: presence.timestamp,
+          );
+        } else {
+          _driversByUid[entry.key] = entry.value.copyWith(
+            isOnline: presence.online,
+            lastUpdated: presence.timestamp,
+          );
+        }
       }
     });
-  }
-
-  int _riskFromLevel(int level) {
-    return _riskFromLevelValue(level);
-  }
-
-  String _statusFromRisk(int risk) {
-    return _statusFromRiskValue(risk);
   }
 
   List<_DriverData> get _sortedDrivers {
@@ -370,11 +372,7 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
                           separatorBuilder: (_, __) => const Divider(),
                           itemBuilder: (context, index) {
                             final alert = alerts[index];
-                            final risk = _riskFromLevelValue(alert.level);
-                            final color = _riskColor(
-                              risk,
-                              hasFatigueData: true,
-                            );
+                            final color = _alertLevelColor(alert.level);
                             return ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: Icon(
@@ -384,7 +382,7 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
                               title: Text(alert.message),
                               subtitle: Text(_formatAlertTime(alert.timestamp)),
                               trailing: Text(
-                                '$risk%',
+                                _alertLevelLabel(alert.level),
                                 style: TextStyle(
                                   color: color,
                                   fontWeight: FontWeight.w700,
@@ -432,16 +430,15 @@ class _DriverData {
 
   factory _DriverData.fromFleetDriver(FleetDriver driver) {
     final alert = driver.latestAlert;
-    final risk = alert == null ? 0 : _riskFromLevelValue(alert.level);
     return _DriverData(
       uid: driver.uid,
       displayName: _driverDisplayName(driver),
       email: driver.email,
       deviceId: driver.deviceId,
-      risk: risk,
-      status: alert == null ? 'No data' : _statusFromRiskValue(risk),
+      risk: 0,
+      status: 'No data',
       isOnline: driver.online,
-      hasFatigueData: alert != null,
+      hasFatigueData: false,
       lastAlert: alert?.message,
       lastUpdated: alert?.timestamp ?? driver.lastSeen,
     );
@@ -482,23 +479,31 @@ String _driverDisplayName(FleetDriver driver) {
   return driver.uid;
 }
 
-int _riskFromLevelValue(int level) {
+String _alertLevelLabel(int level) {
   switch (level) {
-    case 0:
-      return 20;
-    case 1:
-      return 55;
-    case 2:
-      return 85;
-    default:
-      return 30;
+    case 0: return 'SAFE';
+    case 1: return 'WARNING';
+    case 2: return 'DANGER';
+    default: return 'UNKNOWN';
+  }
+}
+
+Color _alertLevelColor(int level) {
+  switch (level) {
+    case 0: return const Color(0xFF10B981);
+    case 1: return const Color(0xFFF59E0B);
+    case 2: return const Color(0xFFEF4444);
+    default: return Colors.grey;
   }
 }
 
 String _statusFromRiskValue(int risk) {
-  if (risk >= 70) return 'Critical';
-  if (risk >= 40) return 'Elevated';
-  return 'Normal';
+  if (risk >= 90) return 'Extreme fatigue';
+  if (risk >= 70) return 'Critical fatigue';
+  if (risk >= 50) return 'High fatigue';
+  if (risk >= 30) return 'Moderate fatigue';
+  if (risk >= 10) return 'Low fatigue';
+  return 'No data';
 }
 
 Color _riskColor(int risk, {required bool hasFatigueData}) {
