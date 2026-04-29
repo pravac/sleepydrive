@@ -239,21 +239,26 @@ class BleService {
 
       _setState('Connecting…');
 
-      try {
-        // Pre-emptively disconnect to clear any stale GATT state Android
-        // may be holding from a previous connection to this device.
-        try {
-          await found.disconnect();
-          await Future.delayed(const Duration(milliseconds: 300));
-        } catch (_) {}
+      // Cancel the old connSub NOW — before connect() — so no stale listener
+      // is alive to fire spurious disconnect events during the setup sequence.
+      _connSub?.cancel();
+      _connSub = null;
 
+      try {
         await found.connect(timeout: const Duration(seconds: 10));
         _device = found;
 
-        // Requesting MTU right after connect forces a full GATT handshake.
-        // This is a well-known workaround for Android GATT_ERROR 133 that
-        // otherwise causes connections to silently fail or drop soon after.
+        // High-priority connection request: tightens the connection interval to
+        // 7.5–15 ms, making supervision-timeout disconnects far less likely.
         if (defaultTargetPlatform == TargetPlatform.android) {
+          try {
+            await found
+                .requestConnectionPriority(
+                  connectionPriorityRequest: ConnectionPriority.high,
+                )
+                .timeout(const Duration(seconds: 5));
+          } catch (_) {}
+          // Requesting MTU forces a GATT handshake — known fix for GATT_ERROR 133.
           try {
             await found.requestMtu(512).timeout(const Duration(seconds: 5));
           } catch (_) {}
@@ -262,7 +267,6 @@ class BleService {
         _setState('Connected');
 
         // React to disconnection on this specific device object.
-        _connSub?.cancel();
         _connSub = found.connectionState.listen((state) {
           if (state == BluetoothConnectionState.disconnected) {
             _notifySub?.cancel();
@@ -270,9 +274,8 @@ class BleService {
             final staleDevice = _device;
             _device = null;
             _setState('Disconnected');
-            // Explicitly flush Android's GATT cache before reconnecting.
-            // Without this, the next connect() hits a ghost entry and
-            // immediately fails with GATT_ERROR 133.
+            // Flush Android GATT state before reconnecting to prevent
+            // GATT_ERROR 133 on the next connect attempt.
             Future(() async {
               try { await staleDevice?.disconnect(); } catch (_) {}
               _scheduleReconnect();
