@@ -27,7 +27,7 @@ import dbus.mainloop.glib
 import dbus.service
 from gi.repository import GLib
 
-import config as cfg
+from ble import config as cfg
 
 log = logging.getLogger("ble")
 
@@ -243,17 +243,13 @@ class BLENotifier:
         self._loop: GLib.MainLoop | None = None
         self._char: Characteristic | None = None
         self._ready = threading.Event()
-        self._startup_error: Exception | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────
     def start(self):
         """Start the BLE GATT server in a daemon thread."""
         self._thread = threading.Thread(target=self._run, daemon=True, name="ble")
         self._thread.start()
-        if not self._ready.wait(timeout=10):
-            raise TimeoutError("BLE startup timed out")
-        if self._startup_error is not None:
-            raise RuntimeError(str(self._startup_error)) from self._startup_error
+        self._ready.wait(timeout=10)
         log.info("BLE notifier started — advertising as '%s'", cfg.BLE_DEVICE_NAME)
 
     def stop(self):
@@ -281,56 +277,56 @@ class BLENotifier:
     # ── internal ──────────────────────────────────────────────────────
     def _run(self):
         """Runs in a background thread — sets up D-Bus + GLib mainloop."""
-        try:
-            dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-            bus = dbus.SystemBus()
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        bus = dbus.SystemBus()
 
-            adapter_path = self._find_adapter(bus)
-            if not adapter_path:
-                self._startup_error = RuntimeError("No BLE adapter found")
-                log.error("No BLE adapter found — notifications disabled")
-                self._ready.set()
-                return
-
-            # Make adapter discoverable
-            adapter_props = dbus.Interface(
-                bus.get_object(BLUEZ_SERVICE, adapter_path), DBUS_PROP_IFACE
-            )
-            adapter_props.Set(ADAPTER_IFACE, "Powered", dbus.Boolean(True))
-            adapter_props.Set(ADAPTER_IFACE, "Alias", dbus.String(cfg.BLE_DEVICE_NAME))
-
-            # Build GATT application
-            app = Application(bus)
-            svc = Service(bus, 0, cfg.BLE_SERVICE_UUID, True)
-            char = Characteristic(
-                bus, 0, cfg.BLE_CHAR_UUID, ["read", "notify"], svc
-            )
-            svc.add_characteristic(char)
-            app.add_service(svc)
-            self._char = char
-
-            # Register GATT application
-            gatt_mgr = dbus.Interface(
-                bus.get_object(BLUEZ_SERVICE, adapter_path), GATT_MGR_IFACE
-            )
-            gatt_mgr.RegisterApplication(app.get_path(), {})
-            log.info("GATT application registered")
-
-            # Register LE advertisement
-            ad = Advertisement(bus, cfg.BLE_DEVICE_NAME, cfg.BLE_SERVICE_UUID)
-            ad_mgr = dbus.Interface(
-                bus.get_object(BLUEZ_SERVICE, adapter_path), LE_AD_MGR_IFACE
-            )
-            ad_mgr.RegisterAdvertisement(ad.get_path(), {})
-            log.info("BLE advertisement registered")
-
-            self._loop = GLib.MainLoop()
+        adapter_path = self._find_adapter(bus)
+        if not adapter_path:
+            log.error("No BLE adapter found — notifications disabled")
             self._ready.set()
-            self._loop.run()
-        except Exception as exc:
-            self._startup_error = exc
-            log.error("BLE startup failed: %s", exc)
-            self._ready.set()
+            return
+
+        # Make adapter discoverable
+        adapter_props = dbus.Interface(
+            bus.get_object(BLUEZ_SERVICE, adapter_path), DBUS_PROP_IFACE
+        )
+        adapter_props.Set(ADAPTER_IFACE, "Powered", dbus.Boolean(True))
+        adapter_props.Set(ADAPTER_IFACE, "Alias", dbus.String(cfg.BLE_DEVICE_NAME))
+
+        # Build GATT application
+        app = Application(bus)
+        svc = Service(bus, 0, cfg.BLE_SERVICE_UUID, True)
+        char = Characteristic(
+            bus, 0, cfg.BLE_CHAR_UUID, ["read", "notify"], svc
+        )
+        svc.add_characteristic(char)
+        app.add_service(svc)
+        self._char = char
+
+        # Register GATT application
+        gatt_mgr = dbus.Interface(
+            bus.get_object(BLUEZ_SERVICE, adapter_path), GATT_MGR_IFACE
+        )
+        gatt_mgr.RegisterApplication(
+            app.get_path(), {},
+            reply_handler=lambda: log.info("GATT application registered"),
+            error_handler=lambda e: log.error("GATT registration failed: %s", e),
+        )
+
+        # Register LE advertisement
+        ad = Advertisement(bus, cfg.BLE_DEVICE_NAME, cfg.BLE_SERVICE_UUID)
+        ad_mgr = dbus.Interface(
+            bus.get_object(BLUEZ_SERVICE, adapter_path), LE_AD_MGR_IFACE
+        )
+        ad_mgr.RegisterAdvertisement(
+            ad.get_path(), {},
+            reply_handler=lambda: log.info("BLE advertisement registered"),
+            error_handler=lambda e: log.error("BLE advert failed: %s", e),
+        )
+
+        self._loop = GLib.MainLoop()
+        self._ready.set()
+        self._loop.run()
 
     @staticmethod
     def _find_adapter(bus) -> str | None:
