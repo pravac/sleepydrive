@@ -120,6 +120,43 @@ def _first_present(*values: Any) -> Any:
     return None
 
 
+def _coerce_percent(raw: Any) -> int | None:
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = float(str(raw).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return 0
+    if 0 < value <= 1:
+        value *= 100
+    return max(0, min(round(value), 100))
+
+
+def _first_percent_from_payload(obj: dict[str, Any], metadata: dict[str, Any]) -> int | None:
+    candidates = (
+        "fatigue_risk_percent",
+        "fatigue_risk",
+        "fatigueRiskPercent",
+        "fatigueRisk",
+        "risk_percent",
+        "riskPercent",
+        "fatigue_score",
+        "fatigueScore",
+        "score",
+    )
+    for key in candidates:
+        value = _coerce_percent(_first_present(obj.get(key), metadata.get(key)))
+        if value is not None:
+            return value
+
+    risk = _coerce_percent(_first_present(obj.get("risk"), metadata.get("risk")))
+    if risk is not None and risk > 2:
+        return risk
+    return None
+
+
 @dataclass(frozen=True)
 class AlertEvent:
     device_id: str
@@ -267,6 +304,10 @@ def parse_mqtt_payload(topic: str, payload: bytes) -> AlertEvent:
             for key, value in obj.items():
                 if key not in known:
                     metadata[key] = value
+
+            fatigue_risk_percent = _first_percent_from_payload(obj, metadata)
+            if fatigue_risk_percent is not None:
+                metadata.setdefault("fatigue_risk_percent", fatigue_risk_percent)
 
             metadata = _sanitize_metadata(metadata)
 

@@ -8,13 +8,18 @@ class JetsonAlert {
   final int level;
   final String message;
   final DateTime timestamp;
+  final Map<String, dynamic> metadata;
+  final int? fatigueRiskPercent;
 
   JetsonAlert({
     required this.deviceId,
     required this.level,
     required this.message,
     DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
+    Map<String, dynamic>? metadata,
+    this.fatigueRiskPercent,
+  }) : timestamp = timestamp ?? DateTime.now(),
+       metadata = metadata ?? const <String, dynamic>{};
 
   String get levelLabel {
     switch (level) {
@@ -34,20 +39,25 @@ class JetsonPresence {
   final String sourceId;
   final bool online;
   final DateTime timestamp;
+  final Map<String, dynamic> metadata;
+  final int? fatigueRiskPercent;
 
   JetsonPresence({
     required this.sourceId,
     required this.online,
     DateTime? timestamp,
-  }) : timestamp = timestamp ?? DateTime.now();
+    Map<String, dynamic>? metadata,
+    this.fatigueRiskPercent,
+  }) : timestamp = timestamp ?? DateTime.now(),
+       metadata = metadata ?? const <String, dynamic>{};
 }
 
 class JetsonWebSocketService {
   JetsonWebSocketService({
     required Uri uri,
     Duration reconnectDelay = const Duration(seconds: 3),
-  })  : _uri = uri,
-        _reconnectDelay = reconnectDelay;
+  }) : _uri = uri,
+       _reconnectDelay = reconnectDelay;
 
   final Uri _uri;
   final Duration _reconnectDelay;
@@ -100,9 +110,8 @@ class JetsonWebSocketService {
 
       _socketSub = channel.stream.listen(
         _onMessage,
-        onError: (error) => _handleSocketClosed(
-          'Connection error: ${_compactError(error)}',
-        ),
+        onError: (error) =>
+            _handleSocketClosed('Connection error: ${_compactError(error)}'),
         onDone: () => _handleSocketClosed('Disconnected'),
         cancelOnError: false,
       );
@@ -191,12 +200,15 @@ class JetsonWebSocketService {
                 payload['timestamp'] ??
                 payload['ts'],
           );
+          final metadata = _metadataFromPayload(payload);
 
           return JetsonAlert(
             deviceId: deviceId,
             level: level,
             message: msg,
             timestamp: ts,
+            metadata: metadata,
+            fatigueRiskPercent: _parseFatigueRisk(payload, metadata),
           );
         }
       } catch (_) {
@@ -236,7 +248,9 @@ class JetsonWebSocketService {
     } else {
       text = raw.toString().trim();
     }
-    if (text.isEmpty || !(text.startsWith('{') && text.endsWith('}'))) return null;
+    if (text.isEmpty || !(text.startsWith('{') && text.endsWith('}'))) {
+      return null;
+    }
 
     try {
       final decoded = _asStringDynamicMap(jsonDecode(text));
@@ -246,17 +260,32 @@ class JetsonWebSocketService {
       Map<String, dynamic>? payload;
       if (type == 'jetson_presence') {
         payload = _asStringDynamicMap(decoded['data']);
-      } else if (type == 'presence' || type == 'status' || type == 'heartbeat') {
+      } else if (type == 'presence' ||
+          type == 'status' ||
+          type == 'heartbeat') {
         payload = decoded;
       } else {
         return null;
       }
       if (payload == null) return null;
 
-      final sourceId = (payload['source_id'] ?? payload['device_id'] ?? 'jetson').toString();
-      final online = _parseOnline(payload['online'] ?? payload['status'], defaultValue: type == 'heartbeat');
-      final ts = _parseTimestamp(payload['event_ts'] ?? payload['timestamp'] ?? payload['ts']);
-      return JetsonPresence(sourceId: sourceId, online: online, timestamp: ts);
+      final sourceId =
+          (payload['source_id'] ?? payload['device_id'] ?? 'jetson').toString();
+      final online = _parseOnline(
+        payload['online'] ?? payload['status'],
+        defaultValue: type == 'heartbeat',
+      );
+      final ts = _parseTimestamp(
+        payload['event_ts'] ?? payload['timestamp'] ?? payload['ts'],
+      );
+      final metadata = _metadataFromPayload(payload);
+      return JetsonPresence(
+        sourceId: sourceId,
+        online: online,
+        timestamp: ts,
+        metadata: metadata,
+        fatigueRiskPercent: _parseFatigueRisk(payload, metadata),
+      );
     } catch (_) {
       return null;
     }
@@ -290,6 +319,62 @@ class JetsonWebSocketService {
     return obj;
   }
 
+  Map<String, dynamic> _metadataFromPayload(Map<String, dynamic> payload) {
+    final raw = payload['metadata'];
+    final metadata = raw is Map<String, dynamic>
+        ? Map<String, dynamic>.from(raw)
+        : raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
+
+    for (final key in const [
+      'fatigue_risk_percent',
+      'fatigue_risk',
+      'fatigueRiskPercent',
+      'fatigueRisk',
+      'risk_percent',
+      'riskPercent',
+      'risk',
+      'fatigue_score',
+      'fatigueScore',
+      'score',
+      'event_count',
+      'closed_duration_sec',
+      'ear',
+      'blink_ms',
+    ]) {
+      if (payload.containsKey(key) && !metadata.containsKey(key)) {
+        metadata[key] = payload[key];
+      }
+    }
+
+    return metadata;
+  }
+
+  int? _parseFatigueRisk(
+    Map<String, dynamic> payload,
+    Map<String, dynamic> metadata,
+  ) {
+    for (final key in const [
+      'fatigue_risk_percent',
+      'fatigue_risk',
+      'fatigueRiskPercent',
+      'fatigueRisk',
+      'risk_percent',
+      'riskPercent',
+      'fatigue_score',
+      'fatigueScore',
+      'score',
+    ]) {
+      final value = _parsePercent(payload[key] ?? metadata[key]);
+      if (value != null) return value;
+    }
+
+    final risk = _parsePercent(payload['risk'] ?? metadata['risk']);
+    if (risk != null && risk > 2) return risk;
+    return null;
+  }
+
   int _parseLevel(dynamic raw) {
     if (raw == null) return 1;
     if (raw is int) return raw;
@@ -316,14 +401,32 @@ class JetsonWebSocketService {
     }
   }
 
+  int? _parsePercent(dynamic raw) {
+    if (raw == null || raw is bool) return null;
+    final text = raw.toString().trim().replaceAll('%', '');
+    if (text.isEmpty) return null;
+    final parsed = num.tryParse(text);
+    if (parsed == null) return null;
+    var value = parsed.toDouble();
+    if (value < 0) value = 0;
+    if (value > 0 && value <= 1) value *= 100;
+    return value.round().clamp(0, 100).toInt();
+  }
+
   bool _parseOnline(dynamic raw, {bool defaultValue = true}) {
     if (raw is bool) return raw;
     if (raw == null) return defaultValue;
     final text = raw.toString().trim().toLowerCase();
     if (text == 'online' || text == 'up' || text == 'connected') return true;
-    if (text == 'offline' || text == 'down' || text == 'disconnected') return false;
-    if (text == 'true' || text == '1' || text == 'yes' || text == 'on') return true;
-    if (text == 'false' || text == '0' || text == 'no' || text == 'off') return false;
+    if (text == 'offline' || text == 'down' || text == 'disconnected') {
+      return false;
+    }
+    if (text == 'true' || text == '1' || text == 'yes' || text == 'on') {
+      return true;
+    }
+    if (text == 'false' || text == '0' || text == 'no' || text == 'off') {
+      return false;
+    }
     return defaultValue;
   }
 
@@ -335,7 +438,9 @@ class JetsonWebSocketService {
 
   DateTime _parseTimestamp(dynamic raw) {
     if (raw is DateTime) return raw;
-    if (raw is int) return DateTime.fromMillisecondsSinceEpoch(raw, isUtc: true).toLocal();
+    if (raw is int) {
+      return DateTime.fromMillisecondsSinceEpoch(raw, isUtc: true).toLocal();
+    }
     if (raw is double) {
       final ms = (raw * 1000).round();
       return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();

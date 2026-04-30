@@ -27,12 +27,15 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
   StreamSubscription<JetsonAlert>? _alertSub;
   StreamSubscription<JetsonPresence>? _presenceSub;
   StreamSubscription<String>? _stateSub;
+  Timer? _fleetPollTimer;
+  Timer? _fleetRefreshDebounce;
 
   String _wsState = 'Disconnected';
   String? _fleetName;
   String? _fleetInviteCode;
   String? _fleetLoadError;
   bool _isLoadingFleet = true;
+  bool _isRefreshingFleet = false;
 
   final Map<String, _DriverData> _driversByUid = {};
 
@@ -52,6 +55,9 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
 
     _loadFleetDrivers();
     _jetsonWs.connect();
+    _fleetPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _refreshFleetDrivers();
+    });
   }
 
   @override
@@ -59,6 +65,8 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     _alertSub?.cancel();
     _presenceSub?.cancel();
     _stateSub?.cancel();
+    _fleetPollTimer?.cancel();
+    _fleetRefreshDebounce?.cancel();
     _jetsonWs.dispose();
     super.dispose();
   }
@@ -67,39 +75,65 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     if (!mounted) return;
 
     setState(() {
-      final entries = _entriesForDevice(alert.deviceId);
-      if (entries.isEmpty) return;
+      final entries = _entriesForCandidates(_alertMatchCandidates(alert));
+      if (entries.isEmpty) {
+        _applySingleDriverFallback(
+          risk: alert.fatigueRiskPercent ?? _riskFromAlertLevel(alert.level),
+          status: _statusFromRiskValue(
+            alert.fatigueRiskPercent ?? _riskFromAlertLevel(alert.level),
+          ),
+          isOnline: true,
+          hasFatigueData: true,
+          alertCountDelta: 1,
+          lastAlert: alert.message,
+          lastUpdated: alert.timestamp,
+        );
+        return;
+      }
 
       for (final entry in entries) {
-        final updatedRisk = (entry.value.risk + 10).clamp(0, 100);
+        final updatedRisk =
+            alert.fatigueRiskPercent ?? _riskFromAlertLevel(alert.level);
         _driversByUid[entry.key] = entry.value.copyWith(
           risk: updatedRisk,
           status: _statusFromRiskValue(updatedRisk),
           isOnline: true,
           hasFatigueData: true,
+          alertCount: entry.value.alertCount + 1,
           lastAlert: alert.message,
           lastUpdated: alert.timestamp,
         );
       }
     });
+    _scheduleFleetRefresh();
   }
 
   void _handlePresence(JetsonPresence presence) {
     if (!mounted) return;
 
     setState(() {
-      final entries = _entriesForDevice(presence.sourceId);
-      if (entries.isEmpty) return;
+      final entries = _entriesForCandidates(_presenceMatchCandidates(presence));
+      if (entries.isEmpty) {
+        _applySingleDriverFallback(
+          risk: presence.fatigueRiskPercent,
+          status: presence.fatigueRiskPercent == null
+              ? null
+              : _statusFromRiskValue(presence.fatigueRiskPercent!),
+          isOnline: presence.online,
+          hasFatigueData: presence.fatigueRiskPercent != null,
+          lastUpdated: presence.timestamp,
+        );
+        return;
+      }
 
       for (final entry in entries) {
-        final wasOffline = !entry.value.isOnline;
-        if (presence.online && wasOffline) {
+        final updatedRisk = presence.fatigueRiskPercent;
+        if (updatedRisk != null) {
           _driversByUid[entry.key] = entry.value.copyWith(
-            isOnline: true,
-            risk: 0,
-            status: 'No data',
-            hasFatigueData: false,
-            lastAlert: null,
+            isOnline: presence.online,
+            risk: updatedRisk,
+            status: _statusFromRiskValue(updatedRisk),
+            hasFatigueData: true,
             lastUpdated: presence.timestamp,
           );
         } else {
@@ -110,6 +144,7 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
         }
       }
     });
+    _scheduleFleetRefresh();
   }
 
   List<_DriverData> get _sortedDrivers {
@@ -123,14 +158,79 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     return list;
   }
 
-  List<MapEntry<String, _DriverData>> _entriesForDevice(String deviceId) {
+  List<MapEntry<String, _DriverData>> _entriesForCandidates(
+    Iterable<String?> candidates,
+  ) {
+    final normalizedCandidates = candidates
+        .map(_normalizeMatchValue)
+        .where((value) => value.isNotEmpty)
+        .toSet();
     final matches = <MapEntry<String, _DriverData>>[];
+    if (normalizedCandidates.isEmpty) return matches;
+
     for (final entry in _driversByUid.entries) {
-      if (entry.value.deviceId == deviceId) {
+      final driver = entry.value;
+      final driverValues = {
+        _normalizeMatchValue(driver.uid),
+        _normalizeMatchValue(driver.deviceId),
+        _normalizeMatchValue(driver.email),
+        _normalizeMatchValue(driver.displayName),
+      };
+      if (driverValues.any(normalizedCandidates.contains)) {
         matches.add(entry);
       }
     }
     return matches;
+  }
+
+  List<String?> _alertMatchCandidates(JetsonAlert alert) {
+    return [
+      alert.deviceId,
+      alert.metadata['device_id']?.toString(),
+      alert.metadata['source_id']?.toString(),
+      alert.metadata['driver_uid']?.toString(),
+      alert.metadata['uid']?.toString(),
+      alert.metadata['email']?.toString(),
+      alert.metadata['driver_email']?.toString(),
+    ];
+  }
+
+  List<String?> _presenceMatchCandidates(JetsonPresence presence) {
+    return [
+      presence.sourceId,
+      presence.metadata['device_id']?.toString(),
+      presence.metadata['source_id']?.toString(),
+      presence.metadata['driver_uid']?.toString(),
+      presence.metadata['uid']?.toString(),
+      presence.metadata['email']?.toString(),
+      presence.metadata['driver_email']?.toString(),
+    ];
+  }
+
+  String _normalizeMatchValue(String? value) {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  void _applySingleDriverFallback({
+    int? risk,
+    String? status,
+    bool? isOnline,
+    bool? hasFatigueData,
+    int alertCountDelta = 0,
+    String? lastAlert,
+    DateTime? lastUpdated,
+  }) {
+    if (_driversByUid.length != 1) return;
+    final entry = _driversByUid.entries.first;
+    _driversByUid[entry.key] = entry.value.copyWith(
+      risk: risk,
+      status: status,
+      isOnline: isOnline,
+      hasFatigueData: hasFatigueData,
+      alertCount: entry.value.alertCount + alertCountDelta,
+      lastAlert: lastAlert,
+      lastUpdated: lastUpdated,
+    );
   }
 
   Future<void> _loadFleetDrivers() async {
@@ -161,19 +261,48 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     }
   }
 
+  void _scheduleFleetRefresh() {
+    _fleetRefreshDebounce?.cancel();
+    _fleetRefreshDebounce = Timer(const Duration(milliseconds: 350), () {
+      _refreshFleetDrivers();
+    });
+  }
+
+  Future<void> _refreshFleetDrivers() async {
+    if (_isRefreshingFleet || _isLoadingFleet) return;
+    _isRefreshingFleet = true;
+    try {
+      final data = await _userRoleService.fetchFleetDashboard();
+      _applyFleetDashboardData(data);
+      if (!mounted) return;
+      setState(() {
+        _fleetLoadError = null;
+      });
+    } catch (_) {
+      // Keep the current dashboard visible during background refresh failures.
+    } finally {
+      _isRefreshingFleet = false;
+    }
+  }
+
   void _applyFleetDashboardData(FleetDashboardData data) {
     if (!mounted) return;
 
     setState(() {
       _fleetName = data.fleet.name;
       _fleetInviteCode = data.fleet.inviteCode;
+      final previousDrivers = Map<String, _DriverData>.from(_driversByUid);
       _driversByUid
         ..clear()
         ..addEntries(
-          data.drivers.map(
-            (driver) =>
-                MapEntry(driver.uid, _DriverData.fromFleetDriver(driver)),
-          ),
+          data.drivers.map((driver) {
+            final next = _DriverData.fromFleetDriver(driver);
+            final previous = previousDrivers[driver.uid];
+            return MapEntry(
+              driver.uid,
+              previous == null ? next : _mergeDriverData(previous, next),
+            );
+          }),
         );
     });
   }
@@ -404,6 +533,7 @@ class _DriverData {
   final String status;
   final bool isOnline;
   final bool hasFatigueData;
+  final int alertCount;
   final String? lastAlert;
   final DateTime? lastUpdated;
 
@@ -416,21 +546,25 @@ class _DriverData {
     required this.status,
     required this.isOnline,
     required this.hasFatigueData,
+    required this.alertCount,
     this.lastAlert,
     this.lastUpdated,
   });
 
   factory _DriverData.fromFleetDriver(FleetDriver driver) {
     final alert = driver.latestAlert;
+    final risk = driver.fatigueRiskPercent ?? alert?.fatigueRiskPercent;
+    final hasFatigueData = risk != null;
     return _DriverData(
       uid: driver.uid,
       displayName: _driverDisplayName(driver),
       email: driver.email,
       deviceId: driver.deviceId,
-      risk: 0,
-      status: 'No data',
+      risk: risk ?? 0,
+      status: driver.fatigueStatus ?? _statusFromRiskValue(risk ?? 0),
       isOnline: driver.online,
-      hasFatigueData: false,
+      hasFatigueData: hasFatigueData,
+      alertCount: driver.alertCount,
       lastAlert: alert?.message,
       lastUpdated: alert?.timestamp ?? driver.lastSeen,
     );
@@ -444,6 +578,7 @@ class _DriverData {
     String? status,
     bool? isOnline,
     bool? hasFatigueData,
+    int? alertCount,
     String? lastAlert,
     DateTime? lastUpdated,
   }) {
@@ -456,6 +591,7 @@ class _DriverData {
       status: status ?? this.status,
       isOnline: isOnline ?? this.isOnline,
       hasFatigueData: hasFatigueData ?? this.hasFatigueData,
+      alertCount: alertCount ?? this.alertCount,
       lastAlert: lastAlert ?? this.lastAlert,
       lastUpdated: lastUpdated ?? this.lastUpdated,
     );
@@ -468,6 +604,34 @@ String _driverDisplayName(FleetDriver driver) {
   final email = driver.email?.trim();
   if (email != null && email.isNotEmpty) return email;
   return driver.uid;
+}
+
+_DriverData _mergeDriverData(_DriverData previous, _DriverData next) {
+  final previousTime = previous.lastUpdated;
+  final nextTime = next.lastUpdated;
+  final previousIsNewer =
+      previousTime != null &&
+      (nextTime == null || previousTime.isAfter(nextTime));
+
+  if (!previousIsNewer && (next.hasFatigueData || !previous.hasFatigueData)) {
+    return next.copyWith(
+      alertCount: next.alertCount >= previous.alertCount
+          ? next.alertCount
+          : previous.alertCount,
+    );
+  }
+
+  return next.copyWith(
+    risk: previous.hasFatigueData ? previous.risk : next.risk,
+    status: previous.hasFatigueData ? previous.status : next.status,
+    isOnline: previousIsNewer ? previous.isOnline : next.isOnline,
+    hasFatigueData: previous.hasFatigueData || next.hasFatigueData,
+    alertCount: next.alertCount >= previous.alertCount
+        ? next.alertCount
+        : previous.alertCount,
+    lastAlert: previous.lastAlert ?? next.lastAlert,
+    lastUpdated: previousIsNewer ? previous.lastUpdated : next.lastUpdated,
+  );
 }
 
 String _alertLevelLabel(int level) {
@@ -503,6 +667,12 @@ String _statusFromRiskValue(int risk) {
   if (risk >= 30) return 'Moderate fatigue';
   if (risk >= 10) return 'Low fatigue';
   return 'No data';
+}
+
+int _riskFromAlertLevel(int level) {
+  if (level <= 0) return 0;
+  if (level == 1) return 50;
+  return 90;
 }
 
 Color _riskColor(int risk, {required bool hasFatigueData}) {
@@ -592,14 +762,21 @@ class _DriverCard extends StatelessWidget {
                     style: TextStyle(color: Colors.grey.shade700),
                   ),
                   const SizedBox(height: 6),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       _StatusBadge(label: driver.status, color: color),
-                      const SizedBox(width: 8),
                       _StatusBadge(
                         label: driver.isOnline ? 'Live' : 'Offline',
                         color: driver.isOnline
                             ? const Color(0xFF10B981)
+                            : Colors.grey,
+                      ),
+                      _StatusBadge(
+                        label: '${driver.alertCount} alerts',
+                        color: driver.alertCount > 0
+                            ? const Color(0xFF3B82F6)
                             : Colors.grey,
                       ),
                     ],
@@ -678,9 +855,10 @@ class _SummaryRow extends StatelessWidget {
     final critical = drivers
         .where((d) => d.hasFatigueData && d.risk >= 70)
         .length;
-    final elevated = drivers
-        .where((d) => d.hasFatigueData && d.risk >= 40 && d.risk < 70)
-        .length;
+    final alerts = drivers.fold<int>(
+      0,
+      (sum, driver) => sum + driver.alertCount,
+    );
     final offline = drivers.where((d) => !d.isOnline).length;
 
     return Row(
@@ -688,7 +866,7 @@ class _SummaryRow extends StatelessWidget {
       children: [
         _SummaryBox('Drivers', total.toString()),
         _SummaryBox('Critical', critical.toString()),
-        _SummaryBox('Elevated', elevated.toString()),
+        _SummaryBox('Alerts', alerts.toString()),
         _SummaryBox('Offline', offline.toString()),
       ],
     );

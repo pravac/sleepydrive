@@ -91,6 +91,71 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
+def _coerce_percent(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(str(value).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return 0
+    if 0 < parsed <= 1:
+        parsed *= 100
+    return max(0, min(round(parsed), 100))
+
+
+def _metadata_percent(metadata: Any) -> int | None:
+    if not isinstance(metadata, dict):
+        return None
+    for key in (
+        "fatigue_risk_percent",
+        "fatigue_risk",
+        "fatigueRiskPercent",
+        "fatigueRisk",
+        "risk_percent",
+        "riskPercent",
+        "fatigue_score",
+        "fatigueScore",
+        "score",
+    ):
+        value = _coerce_percent(metadata.get(key))
+        if value is not None:
+            return value
+    risk = _coerce_percent(metadata.get("risk"))
+    if risk is not None and risk > 2:
+        return risk
+    return None
+
+
+def _risk_from_alert_level(level: Any) -> int | None:
+    try:
+        parsed = int(level)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return 0
+    if parsed == 1:
+        return 50
+    return 90
+
+
+def _fatigue_status(risk: int | None) -> str:
+    if risk is None:
+        return "No data"
+    if risk >= 90:
+        return "Extreme fatigue"
+    if risk >= 70:
+        return "Critical fatigue"
+    if risk >= 50:
+        return "High fatigue"
+    if risk >= 30:
+        return "Moderate fatigue"
+    if risk >= 10:
+        return "Low fatigue"
+    return "No fatigue"
+
+
 async def _receive_within_limit(websocket: WebSocket, max_bytes: int) -> None:
     message = await websocket.receive()
     if message["type"] == "websocket.disconnect":
@@ -475,25 +540,68 @@ def create_app() -> FastAPI:
                     u.email,
                     u.display_name,
                     u.device_id,
-                    ds.online,
-                    ds.last_seen,
+                    COALESCE(ds.online, ds_any.online) AS online,
+                    COALESCE(ds.last_seen, ds_any.last_seen) AS last_seen,
+                    COALESCE(ds.metadata, ds_any.metadata) AS status_metadata,
                     ae.id AS alert_id,
                     ae.level AS alert_level,
                     ae.message AS alert_message,
                     ae.event_ts AS alert_event_ts,
-                    ae.received_ts AS alert_received_ts
+                    ae.received_ts AS alert_received_ts,
+                    ae.metadata AS alert_metadata,
+                    ac.alert_count
                 FROM users u
                 LEFT JOIN device_status ds ON ds.device_id = u.device_id
                 LEFT JOIN LATERAL (
-                    SELECT id, level, message, event_ts, received_ts
+                    SELECT online, last_seen, metadata
+                    FROM device_status
+                    WHERE (
+                        SELECT COUNT(*)
+                        FROM users
+                        WHERE role = 'driver' AND fleet_id = $1
+                    ) = 1
+                    ORDER BY last_seen DESC
+                    LIMIT 1
+                ) ds_any ON ds.device_id IS NULL
+                LEFT JOIN LATERAL (
+                    SELECT id, level, message, event_ts, received_ts, metadata
                     FROM alert_events
                     WHERE device_id = u.device_id
+                       OR (
+                            (
+                                SELECT COUNT(*)
+                                FROM users
+                                WHERE role = 'driver' AND fleet_id = $1
+                            ) = 1
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM alert_events
+                                WHERE device_id = u.device_id
+                            )
+                        )
                     ORDER BY received_ts DESC
                     LIMIT 1
                 ) ae ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS alert_count
+                    FROM alert_events
+                    WHERE device_id = u.device_id
+                       OR (
+                            (
+                                SELECT COUNT(*)
+                                FROM users
+                                WHERE role = 'driver' AND fleet_id = $1
+                            ) = 1
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM alert_events
+                                WHERE device_id = u.device_id
+                            )
+                        )
+                ) ac ON TRUE
                 WHERE u.role = 'driver' AND u.fleet_id = $1
                 ORDER BY
-                    COALESCE(ae.received_ts, ds.last_seen, u.updated_at) DESC,
+                    COALESCE(ae.received_ts, ds.last_seen, ds_any.last_seen, u.updated_at) DESC,
                     u.display_name ASC NULLS LAST,
                     u.email ASC NULLS LAST
                 """,
@@ -502,6 +610,14 @@ def create_app() -> FastAPI:
 
         drivers: list[dict[str, Any]] = []
         for row in rows:
+            status_metadata = row["status_metadata"] if isinstance(row["status_metadata"], dict) else {}
+            alert_metadata = row["alert_metadata"] if isinstance(row["alert_metadata"], dict) else {}
+            fatigue_risk_percent = _metadata_percent(alert_metadata)
+            if fatigue_risk_percent is None:
+                fatigue_risk_percent = _metadata_percent(status_metadata)
+            if fatigue_risk_percent is None:
+                fatigue_risk_percent = _risk_from_alert_level(row["alert_level"])
+
             latest_alert = None
             if row["alert_id"] is not None:
                 latest_alert = {
@@ -510,6 +626,8 @@ def create_app() -> FastAPI:
                     "message": row["alert_message"],
                     "event_ts": _iso(row["alert_event_ts"]),
                     "received_ts": _iso(row["alert_received_ts"]),
+                    "metadata": alert_metadata,
+                    "fatigue_risk_percent": fatigue_risk_percent,
                 }
 
             drivers.append(
@@ -520,7 +638,20 @@ def create_app() -> FastAPI:
                     "device_id": row["device_id"],
                     "online": bool(row["online"]) if row["online"] is not None else False,
                     "last_seen": _iso(row["last_seen"]),
+                    "status_metadata": status_metadata,
+                    "alert_count": row["alert_count"] or 0,
+                    "fatigue_risk_percent": fatigue_risk_percent,
+                    "fatigue_status": _fatigue_status(fatigue_risk_percent),
                     "latest_alert": latest_alert,
+                    "metrics": {
+                        "online": bool(row["online"]) if row["online"] is not None else False,
+                        "last_seen": _iso(row["last_seen"]),
+                        "alert_count": row["alert_count"] or 0,
+                        "fatigue_risk_percent": fatigue_risk_percent,
+                        "fatigue_status": _fatigue_status(fatigue_risk_percent),
+                        "latest_alert_level": row["alert_level"],
+                        "latest_alert_at": _iso(row["alert_event_ts"] or row["alert_received_ts"]),
+                    },
                 },
             )
 
