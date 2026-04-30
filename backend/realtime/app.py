@@ -540,9 +540,12 @@ def create_app() -> FastAPI:
                     u.email,
                     u.display_name,
                     u.device_id,
-                    COALESCE(ds.online, ds_any.online) AS online,
-                    COALESCE(ds.last_seen, ds_any.last_seen) AS last_seen,
-                    COALESCE(ds.metadata, ds_any.metadata) AS status_metadata,
+                    (
+                        ds.online IS TRUE
+                        AND ds.last_seen >= NOW() - INTERVAL '45 seconds'
+                    ) AS online,
+                    ds.last_seen,
+                    ds.metadata AS status_metadata,
                     ae.id AS alert_id,
                     ae.level AS alert_level,
                     ae.message AS alert_message,
@@ -553,31 +556,11 @@ def create_app() -> FastAPI:
                 FROM users u
                 LEFT JOIN device_status ds ON ds.device_id = u.device_id
                 LEFT JOIN LATERAL (
-                    SELECT online, last_seen, metadata
-                    FROM device_status
-                    WHERE (
-                        SELECT COUNT(*)
-                        FROM users
-                        WHERE role = 'driver' AND fleet_id = $1
-                    ) = 1
-                    ORDER BY last_seen DESC
-                    LIMIT 1
-                ) ds_any ON ds.device_id IS NULL
-                LEFT JOIN LATERAL (
                     SELECT id, level, message, event_ts, received_ts, metadata
                     FROM alert_events
-                    WHERE device_id = u.device_id
-                       OR (
-                            (
-                                SELECT COUNT(*)
-                                FROM users
-                                WHERE role = 'driver' AND fleet_id = $1
-                            ) = 1
-                            AND NOT EXISTS (
-                                SELECT 1
-                                FROM alert_events
-                                WHERE device_id = u.device_id
-                            )
+                    WHERE (
+                            device_id = u.device_id
+                            AND received_ts >= NOW() - INTERVAL '5 minutes'
                         )
                     ORDER BY received_ts DESC
                     LIMIT 1
@@ -585,23 +568,14 @@ def create_app() -> FastAPI:
                 LEFT JOIN LATERAL (
                     SELECT COUNT(*)::int AS alert_count
                     FROM alert_events
-                    WHERE device_id = u.device_id
-                       OR (
-                            (
-                                SELECT COUNT(*)
-                                FROM users
-                                WHERE role = 'driver' AND fleet_id = $1
-                            ) = 1
-                            AND NOT EXISTS (
-                                SELECT 1
-                                FROM alert_events
-                                WHERE device_id = u.device_id
-                            )
+                    WHERE (
+                            device_id = u.device_id
+                            AND received_ts >= NOW() - INTERVAL '5 minutes'
                         )
                 ) ac ON TRUE
                 WHERE u.role = 'driver' AND u.fleet_id = $1
                 ORDER BY
-                    COALESCE(ae.received_ts, ds.last_seen, ds_any.last_seen, u.updated_at) DESC,
+                    COALESCE(ae.received_ts, ds.last_seen, u.updated_at) DESC,
                     u.display_name ASC NULLS LAST,
                     u.email ASC NULLS LAST
                 """,
@@ -613,10 +587,13 @@ def create_app() -> FastAPI:
             status_metadata = row["status_metadata"] if isinstance(row["status_metadata"], dict) else {}
             alert_metadata = row["alert_metadata"] if isinstance(row["alert_metadata"], dict) else {}
             fatigue_risk_percent = _metadata_percent(alert_metadata)
-            if fatigue_risk_percent is None:
+            if fatigue_risk_percent is None and row["online"]:
                 fatigue_risk_percent = _metadata_percent(status_metadata)
             if fatigue_risk_percent is None:
                 fatigue_risk_percent = _risk_from_alert_level(row["alert_level"])
+            is_online = bool(row["online"]) if row["online"] is not None else False
+            if row["alert_id"] is not None:
+                is_online = True
 
             latest_alert = None
             if row["alert_id"] is not None:
@@ -636,7 +613,7 @@ def create_app() -> FastAPI:
                     "email": row["email"],
                     "display_name": row["display_name"],
                     "device_id": row["device_id"],
-                    "online": bool(row["online"]) if row["online"] is not None else False,
+                    "online": is_online,
                     "last_seen": _iso(row["last_seen"]),
                     "status_metadata": status_metadata,
                     "alert_count": row["alert_count"] or 0,
@@ -644,7 +621,7 @@ def create_app() -> FastAPI:
                     "fatigue_status": _fatigue_status(fatigue_risk_percent),
                     "latest_alert": latest_alert,
                     "metrics": {
-                        "online": bool(row["online"]) if row["online"] is not None else False,
+                        "online": is_online,
                         "last_seen": _iso(row["last_seen"]),
                         "alert_count": row["alert_count"] or 0,
                         "fatigue_risk_percent": fatigue_risk_percent,

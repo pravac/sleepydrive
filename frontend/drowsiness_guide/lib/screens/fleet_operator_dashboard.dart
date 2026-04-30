@@ -77,17 +77,6 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     setState(() {
       final entries = _entriesForCandidates(_alertMatchCandidates(alert));
       if (entries.isEmpty) {
-        _applySingleDriverFallback(
-          risk: alert.fatigueRiskPercent ?? _riskFromAlertLevel(alert.level),
-          status: _statusFromRiskValue(
-            alert.fatigueRiskPercent ?? _riskFromAlertLevel(alert.level),
-          ),
-          isOnline: true,
-          hasFatigueData: true,
-          alertCountDelta: 1,
-          lastAlert: alert.message,
-          lastUpdated: alert.timestamp,
-        );
         return;
       }
 
@@ -114,15 +103,6 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     setState(() {
       final entries = _entriesForCandidates(_presenceMatchCandidates(presence));
       if (entries.isEmpty) {
-        _applySingleDriverFallback(
-          risk: presence.fatigueRiskPercent,
-          status: presence.fatigueRiskPercent == null
-              ? null
-              : _statusFromRiskValue(presence.fatigueRiskPercent!),
-          isOnline: presence.online,
-          hasFatigueData: presence.fatigueRiskPercent != null,
-          lastUpdated: presence.timestamp,
-        );
         return;
       }
 
@@ -209,28 +189,6 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
 
   String _normalizeMatchValue(String? value) {
     return (value ?? '').trim().toLowerCase();
-  }
-
-  void _applySingleDriverFallback({
-    int? risk,
-    String? status,
-    bool? isOnline,
-    bool? hasFatigueData,
-    int alertCountDelta = 0,
-    String? lastAlert,
-    DateTime? lastUpdated,
-  }) {
-    if (_driversByUid.length != 1) return;
-    final entry = _driversByUid.entries.first;
-    _driversByUid[entry.key] = entry.value.copyWith(
-      risk: risk,
-      status: status,
-      isOnline: isOnline,
-      hasFatigueData: hasFatigueData,
-      alertCount: entry.value.alertCount + alertCountDelta,
-      lastAlert: lastAlert,
-      lastUpdated: lastUpdated,
-    );
   }
 
   Future<void> _loadFleetDrivers() async {
@@ -419,15 +377,16 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
                     : ListView.builder(
                         itemCount: sortedDrivers.length,
                         itemBuilder: (context, i) {
+                          final driver = sortedDrivers[i];
                           return AnimatedContainer(
+                            key: ValueKey(driver.uid),
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeInOut,
                             child: _DriverCard(
-                              driver: sortedDrivers[i],
+                              driver: driver,
                               rank: i + 1,
-                              onViewAlerts: () =>
-                                  _showDriverAlerts(sortedDrivers[i]),
-                              onRemove: () => _removeDriver(sortedDrivers[i]),
+                              onViewAlerts: () => _showDriverAlerts(driver),
+                              onRemove: () => _removeDriver(driver),
                             ),
                           );
                         },
@@ -443,8 +402,10 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
   void _showDriverAlerts(_DriverData driver) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
+        final currentDriver = _driversByUid[driver.uid] ?? driver;
         return FutureBuilder<List<FleetAlert>>(
           future: _userRoleService.fetchDriverAlerts(driver.uid),
           builder: (context, snapshot) {
@@ -457,12 +418,48 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      driver.displayName,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        const Icon(Icons.person_rounded),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                currentDriver.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              if (currentDriver.deviceId != null)
+                                Text(
+                                  'Device: ${currentDriver.deviceId}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
+                    if (currentDriver.email != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        currentDriver.email!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     if (snapshot.connectionState == ConnectionState.waiting)
                       const Padding(
@@ -609,16 +606,14 @@ String _driverDisplayName(FleetDriver driver) {
 _DriverData _mergeDriverData(_DriverData previous, _DriverData next) {
   final previousTime = previous.lastUpdated;
   final nextTime = next.lastUpdated;
-  final previousIsNewer =
+  final previousIsCurrent =
       previousTime != null &&
-      (nextTime == null || previousTime.isAfter(nextTime));
+      DateTime.now().difference(previousTime).inMinutes < 5;
+  final previousIsNewer =
+      previousIsCurrent && (nextTime == null || previousTime.isAfter(nextTime));
 
-  if (!previousIsNewer && (next.hasFatigueData || !previous.hasFatigueData)) {
-    return next.copyWith(
-      alertCount: next.alertCount >= previous.alertCount
-          ? next.alertCount
-          : previous.alertCount,
-    );
+  if (!previousIsNewer) {
+    return next;
   }
 
   return next.copyWith(
