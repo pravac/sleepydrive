@@ -181,7 +181,9 @@ class JetsonWebSocketService {
           final payload = _extractAlertPayload(decoded);
           if (payload == null) return null;
 
-          final deviceId = payload['device_id']?.toString() ?? 'unknown';
+          final deviceId =
+              (payload['device_id'] ?? payload['source_id'] ?? 'unknown')
+                  .toString();
 
           final level = _parseLevel(
             payload['level'] ?? payload['severity'] ?? payload['risk'],

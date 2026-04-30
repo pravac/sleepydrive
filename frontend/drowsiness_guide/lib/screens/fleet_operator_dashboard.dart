@@ -75,7 +75,10 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     if (!mounted) return;
 
     setState(() {
-      final entries = _entriesForCandidates(_alertMatchCandidates(alert));
+      final entries = _entriesForCandidates(
+        _alertMatchCandidates(alert),
+        allowSingleDriverFallback: true,
+      );
       if (entries.isEmpty) {
         return;
       }
@@ -101,7 +104,10 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     if (!mounted) return;
 
     setState(() {
-      final entries = _entriesForCandidates(_presenceMatchCandidates(presence));
+      final entries = _entriesForCandidates(
+        _presenceMatchCandidates(presence),
+        allowSingleDriverFallback: true,
+      );
       if (entries.isEmpty) {
         return;
       }
@@ -139,8 +145,9 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
   }
 
   List<MapEntry<String, _DriverData>> _entriesForCandidates(
-    Iterable<String?> candidates,
-  ) {
+    Iterable<String?> candidates, {
+    bool allowSingleDriverFallback = false,
+  }) {
     final normalizedCandidates = candidates
         .map(_normalizeMatchValue)
         .where((value) => value.isNotEmpty)
@@ -159,6 +166,11 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
       if (driverValues.any(normalizedCandidates.contains)) {
         matches.add(entry);
       }
+    }
+    if (matches.isEmpty &&
+        allowSingleDriverFallback &&
+        _driversByUid.length == 1) {
+      return [_driversByUid.entries.first];
     }
     return matches;
   }
