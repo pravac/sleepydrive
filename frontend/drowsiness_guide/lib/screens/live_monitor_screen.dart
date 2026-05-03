@@ -21,7 +21,10 @@ const _border = Color(0x1A000000);
 // -----------------------------------------------------
 
 class LiveMonitorScreen extends StatefulWidget {
-  const LiveMonitorScreen({super.key});
+  const LiveMonitorScreen({super.key, this.bleService, this.jetsonWsService});
+
+  final BleService? bleService;
+  final JetsonWebSocketService? jetsonWsService;
 
   @override
   State<LiveMonitorScreen> createState() => _LiveMonitorScreenState();
@@ -49,15 +52,13 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   bool _weatherLoading = false;
 
   // ── BLE ──
-  final BleService _ble = BleService();
+  late BleService _ble;
   String _bleState = kIsWeb ? 'Tap Bluetooth' : 'Disconnected';
   StreamSubscription? _bleStateSub;
   StreamSubscription? _bleAlertSub;
 
   // ── Jetson WebSocket ──
-  final JetsonWebSocketService _jetsonWs = JetsonWebSocketService(
-    uri: Uri.parse(_jetsonWsUrl),
-  );
+  late JetsonWebSocketService _jetsonWs;
   String _jetsonWsState = 'Disconnected';
   StreamSubscription? _jetsonWsStateSub;
   StreamSubscription? _jetsonWsAlertSub;
@@ -87,6 +88,9 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   @override
   void initState() {
     super.initState();
+    _ble = widget.bleService ?? BleService();
+    _jetsonWs = widget.jetsonWsService ??
+        JetsonWebSocketService(uri: Uri.parse(_jetsonWsUrl));
     WidgetsBinding.instance.addObserver(this);
     _loadLocationOnce();
     _loadProfile();
@@ -310,7 +314,12 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   }
 
   Future<void> _loadProfile() async {
-    final user = FirebaseAuth.instance.currentUser;
+    User? user;
+    try {
+      user = FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      return;
+    }
     if (user == null) return;
     try {
       final profile = await UserRoleService().fetchProfile(user.uid);

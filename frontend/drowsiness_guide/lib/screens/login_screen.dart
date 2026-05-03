@@ -5,15 +5,18 @@ import 'package:drowsiness_guide/services/auth_service.dart';
 import 'package:drowsiness_guide/services/user_role_service.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.authService, this.userRoleService});
+
+  final AuthService? authService;
+  final UserRoleService? userRoleService;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final AuthService _authService = AuthService();
-  final UserRoleService _userRoleService = UserRoleService();
+  late final AuthService _authService;
+  late final UserRoleService _userRoleService;
 
   final TextEditingController _emailCtrl = TextEditingController();
   final TextEditingController _passCtrl = TextEditingController();
@@ -23,6 +26,13 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _errorText;
 
   @override
+  void initState() {
+    super.initState();
+    _authService = widget.authService ?? AuthService();
+    _userRoleService = widget.userRoleService ?? UserRoleService();
+  }
+
+  @override
   void dispose() {
     _emailCtrl.dispose();
     _passCtrl.dispose();
@@ -30,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _routeSignedInUser() async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _authService.currentUser;
     if (user == null) {
       throw Exception('No authenticated user found');
     }
