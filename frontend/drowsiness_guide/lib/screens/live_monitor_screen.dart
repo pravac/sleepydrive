@@ -191,7 +191,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
       _latestAlertLevel = levelLabel;
       final isJetson = source == 'Jetson WS';
       final bool isRecovered = isJetson
-          ? (recovered ?? _messageLooksRecovered(message) || level == 0)
+          ? (level == 0 || recovered == true || _messageLooksRecovered(message))
           : false;
       final bool isUnrecovered = isJetson && !isRecovered;
 
@@ -875,11 +875,6 @@ class _RiskCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(label, style: TextStyle(color: _black(0.65))),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Blink duration + lane behavior",
-                    style: TextStyle(color: _black(0.5)),
-                  ),
                 ],
               ),
             ),

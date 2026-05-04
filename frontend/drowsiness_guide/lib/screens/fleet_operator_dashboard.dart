@@ -97,7 +97,9 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
 
       for (final entry in entries) {
         final isRecovered =
-            alert.recovered ?? _alertMessageLooksRecovered(alert.message);
+            alert.level == 0 ||
+            alert.recovered == true ||
+            _alertMessageLooksRecovered(alert.message);
         if (isRecovered) {
           _activeFatigueByUid[entry.key] = false;
         } else {
