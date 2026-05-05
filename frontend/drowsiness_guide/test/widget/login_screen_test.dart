@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
 import 'package:drowsiness_guide/screens/login_screen.dart';
-import 'mocks.dart';
+import '../helpers/mocks.dart';
 
 // Google Fonts can't fetch from network in tests, so it falls back to a system
 // font with different metrics, causing the Google Sign-In button Row to report

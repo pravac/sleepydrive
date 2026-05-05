@@ -4,7 +4,7 @@ import 'package:mockito/mockito.dart';
 import 'package:drowsiness_guide/screens/live_monitor_screen.dart';
 import 'package:drowsiness_guide/services/ble_service.dart';
 import 'package:drowsiness_guide/services/jetson_websocket_service.dart';
-import 'mocks.dart';
+import '../helpers/mocks.dart';
 
 Widget _buildApp(Widget screen) => MaterialApp(home: screen);
 

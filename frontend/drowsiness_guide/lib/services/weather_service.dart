@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class WeatherService {
-  WeatherService({required this.apiKey});
+  WeatherService({required this.apiKey, http.Client? httpClient})
+      : _client = httpClient ?? http.Client();
 
   final String apiKey;
+  final http.Client _client;
 
   Future<WeatherResult> fetchCurrent({
     required double lat,
@@ -22,7 +24,7 @@ class WeatherService {
       },
     );
 
-    final res = await http.get(uri);
+    final res = await _client.get(uri);
     if (res.statusCode != 200) {
       throw Exception('OpenWeather error ${res.statusCode}: ${res.body}');
     }

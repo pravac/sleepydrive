@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:drowsiness_guide/services/auth_service.dart';
@@ -250,6 +249,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 36),
                       _FlatField(
+                        fieldKey: const ValueKey<String>('login_email'),
                         controller: _emailCtrl,
                         hint: 'email',
                         obscure: false,
@@ -261,6 +261,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 14),
                       _FlatField(
+                        fieldKey: const ValueKey<String>('login_password'),
                         controller: _passCtrl,
                         hint: 'password',
                         obscure: true,
@@ -417,6 +418,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 class _FlatField extends StatelessWidget {
+  final Key? fieldKey;
   final TextEditingController controller;
   final String hint;
   final bool obscure;
@@ -427,6 +429,7 @@ class _FlatField extends StatelessWidget {
   final Color focusBorderColor;
 
   const _FlatField({
+    this.fieldKey,
     required this.controller,
     required this.hint,
     required this.obscure,
@@ -442,6 +445,7 @@ class _FlatField extends StatelessWidget {
     return SizedBox(
       height: 54,
       child: TextField(
+        key: fieldKey,
         controller: controller,
         obscureText: obscure,
         textAlign: TextAlign.center,

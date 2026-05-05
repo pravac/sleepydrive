@@ -413,7 +413,6 @@ class UserRoleService {
         statusCode: response.statusCode,
       );
     }
-
     return UserProfile.fromJson(_decodeObject(response));
   }
 

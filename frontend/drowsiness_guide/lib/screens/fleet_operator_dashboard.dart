@@ -7,7 +7,16 @@ import 'package:drowsiness_guide/services/auth_service.dart';
 import 'package:drowsiness_guide/services/user_role_service.dart';
 
 class FleetOperatorDashboard extends StatefulWidget {
-  const FleetOperatorDashboard({super.key});
+  const FleetOperatorDashboard({
+    super.key,
+    this.jetsonWsService,
+    this.userRoleService,
+    this.authService,
+  });
+
+  final JetsonWebSocketService? jetsonWsService;
+  final UserRoleService? userRoleService;
+  final AuthService? authService;
 
   @override
   State<FleetOperatorDashboard> createState() => _FleetOperatorDashboardState();
@@ -24,10 +33,9 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
     defaultValue: 'ws://localhost:8080/ws/alerts?replay=0',
   );
 
-  late final JetsonWebSocketService _jetsonWs = JetsonWebSocketService(
-    uri: Uri.parse(_jetsonWsUrl),
-  );
-  final UserRoleService _userRoleService = UserRoleService();
+  late final JetsonWebSocketService _jetsonWs;
+  late final UserRoleService _userRoleService;
+  late final AuthService _authService;
   final ValueNotifier<int> _liveAlertsVersion = ValueNotifier<int>(0);
 
   StreamSubscription<JetsonAlert>? _alertSub;
@@ -51,6 +59,11 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
   @override
   void initState() {
     super.initState();
+
+    _authService = widget.authService ?? AuthService();
+    _userRoleService = widget.userRoleService ?? UserRoleService();
+    _jetsonWs = widget.jetsonWsService ??
+        JetsonWebSocketService(uri: Uri.parse(_jetsonWsUrl));
 
     _stateSub = _jetsonWs.connectionState.listen((state) {
       if (!mounted) return;
@@ -375,7 +388,7 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
   }
 
   Future<void> _backToLogin() async {
-    await AuthService().signOut();
+    await _authService.signOut();
 
     if (!mounted) return;
 

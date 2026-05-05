@@ -15,8 +15,20 @@ import '../services/places_service.dart' as gplaces;
 class OSMMapScreen extends StatefulWidget {
   final double? destLat;
   final double? destLng;
+  final osm.OSMPlacesService? osmPlacesService;
+  final gplaces.PlacesService? googlePlacesService;
 
-  const OSMMapScreen({super.key, this.destLat, this.destLng});
+  /// When set (e.g. in tests), skips permission checks and uses this position.
+  final Future<Position> Function()? getCurrentPosition;
+
+  const OSMMapScreen({
+    super.key,
+    this.destLat,
+    this.destLng,
+    this.osmPlacesService,
+    this.googlePlacesService,
+    this.getCurrentPosition,
+  });
 
   @override
   State<OSMMapScreen> createState() => _OSMMapScreenState();
@@ -40,10 +52,8 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
   bool _loadingStops = false;
   bool _showOtherStops = false;
   String? _stopsError;
-  final osm.OSMPlacesService _places = osm.OSMPlacesService();
-  final gplaces.PlacesService _googlePlaces = gplaces.PlacesService(
-    apiKey: googlePlacesApiKey,
-  );
+  late final osm.OSMPlacesService _places;
+  late final gplaces.PlacesService _googlePlaces;
 
   String _status = 'Loading location…';
   String _routeInfo = '';
@@ -55,6 +65,9 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
   @override
   void initState() {
     super.initState();
+    _places = widget.osmPlacesService ?? osm.OSMPlacesService();
+    _googlePlaces = widget.googlePlacesService ??
+        gplaces.PlacesService(apiKey: googlePlacesApiKey);
     if (widget.destLat != null && widget.destLng != null) {
       _dest = LatLng(widget.destLat!, widget.destLng!);
     }
@@ -63,6 +76,25 @@ class _OSMMapScreenState extends State<OSMMapScreen> {
 
   Future<void> _initLocation() async {
     try {
+      if (widget.getCurrentPosition != null) {
+        setState(() => _status = 'Getting current position…');
+        final p = await widget.getCurrentPosition!();
+        setState(() {
+          _pos = p;
+          _status = 'Ready';
+        });
+
+        final me = LatLng(p.latitude, p.longitude);
+        _mapController.move(me, 14);
+
+        await _loadStops();
+
+        if (_dest != null) {
+          await _buildRoute();
+        }
+        return;
+      }
+
       setState(() => _status = 'Requesting location permission…');
 
       LocationPermission perm = await Geolocator.checkPermission();

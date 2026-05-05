@@ -8,7 +8,16 @@ import 'package:drowsiness_guide/screens/osm_map_screen.dart';
 import 'package:drowsiness_guide/services/osm_places_service.dart';
 
 class DrowsinessDetectedScreen extends StatefulWidget {
-  const DrowsinessDetectedScreen({super.key});
+  const DrowsinessDetectedScreen({
+    super.key,
+    this.placesService,
+    this.getCurrentPosition,
+  });
+
+  final OSMPlacesService? placesService;
+
+  /// When set (e.g. in tests), bypasses [Geolocator] and uses this instead.
+  final Future<Position> Function()? getCurrentPosition;
 
   @override
   State<DrowsinessDetectedScreen> createState() =>
@@ -47,13 +56,15 @@ class _DrowsinessDetectedScreenState extends State<DrowsinessDetectedScreen> {
     });
 
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.low,
-        ),
-      ).timeout(_loadTimeout);
+      final pos = widget.getCurrentPosition != null
+          ? await widget.getCurrentPosition!().timeout(_loadTimeout)
+          : await Geolocator.getCurrentPosition(
+              locationSettings: const LocationSettings(
+                accuracy: LocationAccuracy.low,
+              ),
+            ).timeout(_loadTimeout);
 
-      final svc = OSMPlacesService();
+      final svc = widget.placesService ?? OSMPlacesService();
       final gasFuture = svc
           .fetchNearestGasStations(
             lat: pos.latitude,

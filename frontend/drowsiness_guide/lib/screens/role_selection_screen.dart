@@ -7,11 +7,20 @@ import 'package:drowsiness_guide/services/user_role_service.dart';
 class RoleSelectionScreen extends StatefulWidget {
   final String? email;
   final String? password;
+  final AuthService? authService;
+  final UserRoleService? userRoleService;
+
+  /// When set (e.g. in tests), used instead of [FirebaseAuth.instance] for
+  /// the current user, so flows can run without a real Firebase session.
+  final User? Function()? currentUserProvider;
 
   const RoleSelectionScreen({
     super.key,
     required this.email,
     required this.password,
+    this.authService,
+    this.userRoleService,
+    this.currentUserProvider,
   });
 
   @override
@@ -19,8 +28,8 @@ class RoleSelectionScreen extends StatefulWidget {
 }
 
 class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
-  final AuthService _authService = AuthService();
-  final UserRoleService _userRoleService = UserRoleService();
+  late final AuthService _authService;
+  late final UserRoleService _userRoleService;
   final TextEditingController _firstNameCtrl = TextEditingController();
   final TextEditingController _lastNameCtrl = TextEditingController();
   final TextEditingController _fleetInviteCtrl = TextEditingController();
@@ -28,6 +37,16 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
   bool _isLoading = false;
   String? _errorText;
+
+  User? get _currentUser =>
+      widget.currentUserProvider?.call() ?? FirebaseAuth.instance.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _authService = widget.authService ?? AuthService();
+    _userRoleService = widget.userRoleService ?? UserRoleService();
+  }
 
   @override
   void dispose() {
@@ -39,7 +58,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   }
 
   Future<User> _ensureAuthenticatedUser() async {
-    final existingUser = FirebaseAuth.instance.currentUser;
+    final existingUser = _currentUser;
     if (existingUser != null) {
       return existingUser;
     }
@@ -210,7 +229,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       ),
                       const SizedBox(height: 18),
                       Text(
-                        FirebaseAuth.instance.currentUser == null
+                        _currentUser == null
                             ? "Select how you'll use the platform"
                             : "Finish setting up your account",
                         textAlign: TextAlign.center,
@@ -264,6 +283,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       ),
                       const SizedBox(height: 18),
                       _RoleCard(
+                        cardKey: const ValueKey<String>('role_card_driver'),
                         title: 'Fleet Driver',
                         subtitle:
                             'Receive fatigue alerts and access your live monitoring tools.',
@@ -276,6 +296,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
                       ),
                       const SizedBox(height: 18),
                       _RoleCard(
+                        cardKey: const ValueKey<String>('role_card_operator'),
                         title: 'Fleet Operator',
                         subtitle:
                             'Monitor drivers, review alerts, and manage your fleet dashboard.',
@@ -322,6 +343,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 }
 
 class _RoleCard extends StatelessWidget {
+  final Key? cardKey;
   final String title;
   final String subtitle;
   final IconData icon;
@@ -332,6 +354,7 @@ class _RoleCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _RoleCard({
+    this.cardKey,
     required this.title,
     required this.subtitle,
     required this.icon,
@@ -344,71 +367,79 @@ class _RoleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Ink(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: cardColor,
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        label: title,
+        child: Material(
+          key: cardKey,
+          color: Colors.transparent,
+          child: InkWell(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: borderColor),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.12),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+            onTap: onTap,
+            child: Ink(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: borderColor),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: accentColor.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(icon, color: accentColor, size: 28),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 19,
-                          fontWeight: FontWeight.w700,
-                        ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: accentColor.withOpacity(0.14),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        subtitle,
-                        style: TextStyle(
-                          color: textColor.withOpacity(0.72),
-                          fontSize: 14,
-                          height: 1.35,
-                        ),
+                      child: Icon(icon, color: accentColor, size: 28),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              color: textColor,
+                              fontSize: 19,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            subtitle,
+                            style: TextStyle(
+                              color: textColor.withOpacity(0.72),
+                              fontSize: 14,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 10),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: textColor.withOpacity(0.65),
+                      size: 18,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: textColor.withOpacity(0.65),
-                  size: 18,
-                ),
-              ],
+              ),
             ),
           ),
         ),
