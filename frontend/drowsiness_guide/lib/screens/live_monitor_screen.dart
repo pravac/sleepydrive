@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -21,10 +20,16 @@ const _border = Color(0x1A000000);
 // -----------------------------------------------------
 
 class LiveMonitorScreen extends StatefulWidget {
-  const LiveMonitorScreen({super.key, this.bleService, this.jetsonWsService});
+  const LiveMonitorScreen({
+    super.key,
+    this.bleService,
+    this.jetsonWsService,
+    this.authService,
+  });
 
   final BleService? bleService;
   final JetsonWebSocketService? jetsonWsService;
+  final AuthService? authService;
 
   @override
   State<LiveMonitorScreen> createState() => _LiveMonitorScreenState();
@@ -53,6 +58,8 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   String? _weatherErr;
 
   bool _weatherLoading = false;
+
+  late AuthService _authService;
 
   // ── BLE ──
   late BleService _ble;
@@ -93,6 +100,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   @override
   void initState() {
     super.initState();
+    _authService = widget.authService ?? AuthService();
     _ble = widget.bleService ?? BleService();
     _jetsonWs =
         widget.jetsonWsService ??
@@ -375,12 +383,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   }
 
   Future<void> _loadProfile() async {
-    User? user;
-    try {
-      user = FirebaseAuth.instance.currentUser;
-    } catch (_) {
-      return;
-    }
+    final user = _authService.currentUser;
     if (user == null) return;
     try {
       final profile = await UserRoleService().fetchProfile(user.uid);
@@ -393,7 +396,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   }
 
   Future<void> _showEditProfileDialog() async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _authService.currentUser;
     if (user == null) return;
 
     final current = _displayName ?? '';
@@ -488,7 +491,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
       context: context,
       builder: (ctx) => _JoinFleetDialog(
         onJoin: (code) async {
-          final user = FirebaseAuth.instance.currentUser;
+          final user = _authService.currentUser;
           if (user == null) return;
           await UserRoleService().saveRole(
             uid: user.uid,
@@ -514,7 +517,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
   }
 
   Future<void> _backToLogin() async {
-    await AuthService().signOut();
+    await _authService.signOut();
 
     if (!mounted) return;
 

@@ -124,38 +124,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _handleGoogleSignIn() async {
-    setState(() {
-      _isLoading = true;
-      _errorText = null;
-    });
-
-    try {
-      final result = await _authService.signInWithGoogle();
-
-      if (result == null) {
-        setState(() {
-          _errorText = 'Sign-in was cancelled';
-        });
-      } else {
-        await _routeSignedInUser();
-      }
-    } catch (e, st) {
-      debugPrint('Google sign-in error: $e');
-      debugPrintStack(stackTrace: st);
-
-      setState(() {
-        _errorText = _friendlyAuthError(e);
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
   String _friendlyAuthError(Object error) {
     if (error is UserRoleServiceException) {
       if (error.isNotFound) {
@@ -328,69 +296,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: subTextColor,
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'or',
-                        style: TextStyle(color: subTextColor, fontSize: 14),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: 290,
-                        height: 58,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.12),
-                                blurRadius: 18,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: primaryButtonColor,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
-                              ),
-                            ),
-                            onPressed: _isLoading ? null : _handleGoogleSignIn,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                if (_isLoading)
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                else
-                                  const Icon(Icons.login_rounded, size: 24),
-                                const SizedBox(width: 12),
-                                Text(
-                                  _isLoading
-                                      ? 'Signing in...'
-                                      : 'Continue with Google',
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                              ],
-                            ),
                           ),
                         ),
                       ),
