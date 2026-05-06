@@ -994,7 +994,7 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -1085,7 +1085,7 @@ class _ConnectionBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -1217,7 +1217,7 @@ class _EmptyFleetState extends StatelessWidget {
   Widget build(BuildContext context) {
     final muted = Theme.of(
       context,
-    ).textTheme.bodyMedium?.color?.withOpacity(0.72);
+    ).textTheme.bodyMedium?.color?.withValues(alpha: 0.72);
 
     return Center(
       child: Column(

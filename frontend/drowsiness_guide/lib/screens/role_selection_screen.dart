@@ -178,9 +178,9 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     const bgTop = Color(0xFFCED8E4);
     const bgBottom = Color(0xFF7E97B9);
     const textColor = Colors.black;
-    final subTextColor = Colors.black.withOpacity(0.7);
-    final cardColor = Colors.white.withOpacity(0.96);
-    final borderColor = Colors.black.withOpacity(0.08);
+    final subTextColor = Colors.black.withValues(alpha: 0.7);
+    final cardColor = Colors.white.withValues(alpha: 0.96);
+    final borderColor = Colors.black.withValues(alpha: 0.08);
     const primaryColor = Color(0xFF5E8AD6);
 
     return Scaffold(
@@ -371,7 +371,7 @@ class _RoleCard extends StatelessWidget {
                 border: Border.all(color: borderColor),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.12),
+                    color: Colors.black.withValues(alpha: 0.12),
                     blurRadius: 18,
                     offset: const Offset(0, 8),
                   ),
@@ -387,7 +387,7 @@ class _RoleCard extends StatelessWidget {
                       width: 52,
                       height: 52,
                       decoration: BoxDecoration(
-                        color: accentColor.withOpacity(0.14),
+                        color: accentColor.withValues(alpha: 0.14),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Icon(icon, color: accentColor, size: 28),
@@ -409,7 +409,7 @@ class _RoleCard extends StatelessWidget {
                           Text(
                             subtitle,
                             style: TextStyle(
-                              color: textColor.withOpacity(0.72),
+                              color: textColor.withValues(alpha: 0.72),
                               fontSize: 14,
                               height: 1.35,
                             ),
@@ -420,7 +420,7 @@ class _RoleCard extends StatelessWidget {
                     const SizedBox(width: 10),
                     Icon(
                       Icons.arrow_forward_ios_rounded,
-                      color: textColor.withOpacity(0.65),
+                      color: textColor.withValues(alpha: 0.65),
                       size: 18,
                     ),
                   ],
@@ -478,7 +478,7 @@ class _SetupField extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: textColor.withOpacity(0.28)),
+          borderSide: BorderSide(color: textColor.withValues(alpha: 0.28)),
         ),
       ),
     );

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:mockito/mockito.dart';
 import 'package:drowsiness_guide/services/auth_service.dart';
 import 'package:drowsiness_guide/services/user_role_service.dart';
@@ -7,19 +6,10 @@ import 'package:drowsiness_guide/services/ble_service.dart';
 import 'package:drowsiness_guide/services/jetson_websocket_service.dart';
 import 'package:drowsiness_guide/services/osm_places_service.dart';
 
-// ---------------------------------------------------------------------------
-// Lightweight Firebase fakes — used as default returnValues in mocks.
-// ---------------------------------------------------------------------------
-
-class FakeUser extends Fake implements User {
-  @override
-  String get uid => 'test-uid-123';
-}
-
-class FakeUserCredential extends Fake implements UserCredential {
-  @override
-  User? get user => FakeUser();
-}
+AuthUser fakeAuthUser({
+  String uid = 'test-uid-123',
+  String? email = 'user@example.com',
+}) => AuthUser(uid: uid, email: email);
 
 // ---------------------------------------------------------------------------
 // AuthService mock
@@ -29,45 +19,38 @@ class FakeUserCredential extends Fake implements UserCredential {
 
 class MockAuthService extends Mock implements AuthService {
   @override
-  User? get currentUser => super.noSuchMethod(
+  AuthUser? get currentUser => super.noSuchMethod(
         Invocation.getter(#currentUser),
         returnValue: null,
         returnValueForMissingStub: null,
       );
 
   @override
-  Stream<User?> get authStateChanges => super.noSuchMethod(
+  Stream<AuthUser?> get authStateChanges => super.noSuchMethod(
         Invocation.getter(#authStateChanges),
-        returnValue: Stream<User?>.empty(),
-        returnValueForMissingStub: Stream<User?>.empty(),
-      ) as Stream<User?>;
+        returnValue: Stream<AuthUser?>.empty(),
+        returnValueForMissingStub: Stream<AuthUser?>.empty(),
+      ) as Stream<AuthUser?>;
 
   @override
-  Future<UserCredential?> signInWithGoogle() => super.noSuchMethod(
-        Invocation.method(#signInWithGoogle, const []),
-        returnValue: Future<UserCredential?>.value(null),
-        returnValueForMissingStub: Future<UserCredential?>.value(null),
-      ) as Future<UserCredential?>;
-
-  @override
-  Future<UserCredential> signInWithEmailPassword(
+  Future<AuthUser> signInWithEmailPassword(
           {required String email, required String password}) =>
       super.noSuchMethod(
         Invocation.method(#signInWithEmailPassword, const [],
             {#email: email, #password: password}),
-        returnValue: Future.value(FakeUserCredential()),
-        returnValueForMissingStub: Future.value(FakeUserCredential()),
-      ) as Future<UserCredential>;
+        returnValue: Future.value(fakeAuthUser(email: email)),
+        returnValueForMissingStub: Future.value(fakeAuthUser(email: email)),
+      ) as Future<AuthUser>;
 
   @override
-  Future<UserCredential> createUserWithEmailPassword(
+  Future<AuthUser> createUserWithEmailPassword(
           {required String email, required String password}) =>
       super.noSuchMethod(
         Invocation.method(#createUserWithEmailPassword, const [],
             {#email: email, #password: password}),
-        returnValue: Future.value(FakeUserCredential()),
-        returnValueForMissingStub: Future.value(FakeUserCredential()),
-      ) as Future<UserCredential>;
+        returnValue: Future.value(fakeAuthUser(email: email)),
+        returnValueForMissingStub: Future.value(fakeAuthUser(email: email)),
+      ) as Future<AuthUser>;
 
   @override
   Future<void> signOut() => super.noSuchMethod(

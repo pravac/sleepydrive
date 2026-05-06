@@ -142,8 +142,8 @@ void main() {
   group('LoginScreen — successful sign-in routing', () {
     testWidgets('driver role navigates to /dashboard', (tester) async {
       when(mockAuth.signInWithEmailPassword(email: _email, password: _pass))
-          .thenAnswer((_) async => FakeUserCredential());
-      when(mockAuth.currentUser).thenReturn(FakeUser());
+          .thenAnswer((_) async => fakeAuthUser(email: _email));
+      when(mockAuth.currentUser).thenReturn(fakeAuthUser(email: _email));
       when(mockRoleService.fetchRole(_uid)).thenAnswer((_) async => 'driver');
 
       _suppressOverflowErrors();
@@ -159,8 +159,8 @@ void main() {
 
     testWidgets('operator role navigates to /fleet-dashboard', (tester) async {
       when(mockAuth.signInWithEmailPassword(email: _email, password: _pass))
-          .thenAnswer((_) async => FakeUserCredential());
-      when(mockAuth.currentUser).thenReturn(FakeUser());
+          .thenAnswer((_) async => fakeAuthUser(email: _email));
+      when(mockAuth.currentUser).thenReturn(fakeAuthUser(email: _email));
       when(mockRoleService.fetchRole(_uid)).thenAnswer((_) async => 'operator');
 
       _suppressOverflowErrors();
@@ -176,8 +176,8 @@ void main() {
 
     testWidgets('null role navigates to /select-role', (tester) async {
       when(mockAuth.signInWithEmailPassword(email: _email, password: _pass))
-          .thenAnswer((_) async => FakeUserCredential());
-      when(mockAuth.currentUser).thenReturn(FakeUser());
+          .thenAnswer((_) async => fakeAuthUser(email: _email));
+      when(mockAuth.currentUser).thenReturn(fakeAuthUser(email: _email));
       when(mockRoleService.fetchRole(_uid)).thenAnswer((_) async => null);
 
       _suppressOverflowErrors();
@@ -262,32 +262,5 @@ void main() {
       );
     });
 
-    testWidgets('Google sign-in cancelled shows cancellation message',
-        (tester) async {
-      when(mockAuth.signInWithGoogle()).thenAnswer((_) async => null);
-
-      _suppressOverflowErrors();
-      await tester.pumpWidget(buildScreen());
-      await tester.tap(find.text('Continue with Google'));
-      await tester.pump();
-      await tester.pump();
-
-      expect(find.text('Sign-in was cancelled'), findsOneWidget);
-    });
-
-    testWidgets('Google sign-in success routes to dashboard', (tester) async {
-      when(mockAuth.signInWithGoogle())
-          .thenAnswer((_) async => FakeUserCredential());
-      when(mockAuth.currentUser).thenReturn(FakeUser());
-      when(mockRoleService.fetchRole(_uid)).thenAnswer((_) async => 'driver');
-
-      _suppressOverflowErrors();
-      await tester.pumpWidget(buildScreen());
-      await tester.tap(find.text('Continue with Google'));
-      await tester.pump();
-      await tester.pump();
-
-      expect(find.text('Dashboard'), findsOneWidget);
-    });
   });
 }

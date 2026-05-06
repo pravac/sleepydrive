@@ -13,19 +13,5 @@ After cloning this repo, initialize it with:
 `git submodule update --init --recursive`
 
 # How to run:
-any machine:    This is the command to run !!!
 
-1) Terminal 1:
-
-`cd backend/`
-
-`DATABASE_URL=postgresql://sleepydrive:sleepydrive@localhost:5432/sleepydrive python3 run_server.py`
-
-1) Terminal 2:
-
-`cd frontend\drowsiness_guide`   
-
-`flutter run --dart-define=JETSON_WS_URL=wss://sleepydrive.onrender.com/ws/alerts?replay=0`
-
-
-flutter run --dart-define=JETSON_WS_URL=wss://sleepydrive.onrender.com/ws/alerts?replay=0
+`flutter run`

@@ -43,7 +43,6 @@ void main() {
             password: 'secret12',
             authService: mockAuth,
             userRoleService: mockRole,
-            currentUserProvider: () => FakeUser(),
           ),
         ),
       );
