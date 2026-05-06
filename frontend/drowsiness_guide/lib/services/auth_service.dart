@@ -14,6 +14,12 @@ class AuthUser {
 class AuthService {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'auth_token';
+  static const _signupPaths = <String>[
+    '/auth/signup',
+    '/auth/register',
+    '/signup',
+    '/register',
+  ];
   static const _backendBaseUrl = String.fromEnvironment(
     'BACKEND_BASE_URL',
     defaultValue: 'https://sleepydrive.onrender.com',
@@ -88,19 +94,38 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    final response = await http
-        .post(
-          Uri.parse('$_backendBaseUrl/auth/signup'),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({'email': email, 'password': password}),
-        )
-        .timeout(_timeout);
+    final body = jsonEncode({'email': email, 'password': password});
+    http.Response? last404;
 
-    if (response.statusCode != 200 && response.statusCode != 201) {
+    for (final path in _signupPaths) {
+      final response = await http
+          .post(
+            Uri.parse('$_backendBaseUrl$path'),
+            headers: const {'Content-Type': 'application/json'},
+            body: body,
+          )
+          .timeout(_timeout);
+
+      if (response.statusCode == 404) {
+        last404 = response;
+        continue;
+      }
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return _storeAndReturn(response);
+      }
+
       throw Exception(_errorDetail(response));
     }
 
-    return _storeAndReturn(response);
+    if (last404 != null) {
+      throw Exception(
+        'Account creation endpoint was not found on the backend. '
+        'Please redeploy or update the Render backend.',
+      );
+    }
+
+    throw Exception('Authentication failed');
   }
 
   Future<void> signOut() async {

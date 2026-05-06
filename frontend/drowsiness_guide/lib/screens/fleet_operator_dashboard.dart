@@ -30,7 +30,7 @@ class _FleetOperatorDashboardState extends State<FleetOperatorDashboard> {
 
   static const String _jetsonWsUrl = String.fromEnvironment(
     'JETSON_WS_URL',
-    defaultValue: 'ws://localhost:8080/ws/alerts?replay=0',
+    defaultValue: 'wss://sleepydrive.onrender.com/ws/alerts?replay=0',
   );
 
   late final JetsonWebSocketService _jetsonWs;

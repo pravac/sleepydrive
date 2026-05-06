@@ -39,7 +39,7 @@ class _LiveMonitorScreenState extends State<LiveMonitorScreen>
     with WidgetsBindingObserver {
   static const String _jetsonWsUrl = String.fromEnvironment(
     'JETSON_WS_URL',
-    defaultValue: 'ws://localhost:8080/ws/alerts?replay=0',
+    defaultValue: 'wss://sleepydrive.onrender.com/ws/alerts?replay=0',
   );
   static const int _fatigueRiskResetValue = 0;
   static const int _fatigueRiskStep = 10;

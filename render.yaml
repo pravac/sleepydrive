@@ -1,10 +1,10 @@
-# Blueprint defaults for this repo. Your dashboard may use backend/realtime/ as Root Directory.
-# If so, requirements.txt must exist under that path (backend/realtime/requirements.txt).
+# Blueprint defaults for this repo. This service must run from backend/ so
+# auth routes (/auth/signup, /auth/login) and realtime routes are both available.
 
 services:
   - type: web
     name: sleepydrive-gateway
     runtime: python
-    rootDir: backend/realtime
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT

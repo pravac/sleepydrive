@@ -2,22 +2,27 @@
 
 This is the App that will display the nearby rest-stops
 
-## Realtime Gateway WebSocket Alerts
+## Backend + Realtime Defaults
 
-The app listens for real-time alerts and Jetson presence status from the backend gateway websocket:
+By default, this app is configured to use the deployed Render backend for both HTTP APIs and websocket alerts:
 
-- `ws://<gateway-host>:8080/ws/alerts?replay=0`
+- `BACKEND_BASE_URL = https://sleepydrive.onrender.com`
+- `JETSON_WS_URL = wss://sleepydrive.onrender.com/ws/alerts?replay=0`
 
-Set the URL at run time:
+This means you can run the Flutter app without a local backend server:
 
 ```bash
-flutter run --dart-define=JETSON_WS_URL=ws://<gateway-host>:8080/ws/alerts?replay=0
+flutter run
 ```
 
-For public internet access, use TLS:
+## Optional overrides
+
+If you need to point to a different backend (local or another environment), set both values at run time:
 
 ```bash
-flutter run --dart-define=JETSON_WS_URL=wss://<your-domain>/ws/alerts?replay=0
+flutter run \
+  --dart-define=BACKEND_BASE_URL=https://<your-backend-domain> \
+  --dart-define=JETSON_WS_URL=wss://<your-backend-domain>/ws/alerts?replay=0
 ```
 
 TODO:
