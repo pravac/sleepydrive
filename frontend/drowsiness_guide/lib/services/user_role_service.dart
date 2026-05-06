@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 class UserRoleServiceException implements Exception {
@@ -266,10 +266,10 @@ class UserRoleService {
   static const _timeout = Duration(seconds: 20);
 
   Future<Map<String, String>> _headers({bool json = false}) async {
-    final user = FirebaseAuth.instance.currentUser;
-    final token = await user?.getIdToken();
+    const storage = FlutterSecureStorage();
+    final token = await storage.read(key: 'auth_token');
     if (token == null || token.isEmpty) {
-      throw const UserRoleServiceException('No authenticated Firebase user');
+      throw const UserRoleServiceException('Not authenticated');
     }
 
     return {

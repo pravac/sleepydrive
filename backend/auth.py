@@ -1,18 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import HTTPException
-from jwt import PyJWKClient
-
-
-_FIREBASE_CERTS_URL = (
-    "https://www.googleapis.com/service_accounts/v1/jwk/"
-    "securetoken@system.gserviceaccount.com"
-)
 
 
 @dataclass(frozen=True)
@@ -22,43 +14,32 @@ class AuthUser:
     name: str | None = None
 
 
-@lru_cache(maxsize=1)
-def _jwk_client() -> PyJWKClient:
-    return PyJWKClient(_FIREBASE_CERTS_URL)
+def issue_token(uid: str, email: str | None, secret: str, expiry_hours: int) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": uid,
+        "email": email,
+        "iat": now,
+        "exp": now + timedelta(hours=expiry_hours),
+    }
+    return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def require_firebase_user(
-    *,
-    authorization: str | None,
-    project_id: str,
-) -> AuthUser:
+def require_jwt_user(*, authorization: str | None, secret: str) -> AuthUser:
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Firebase ID token")
+        raise HTTPException(status_code=401, detail="Missing token")
 
     token = authorization[7:].strip()
     if not token:
-        raise HTTPException(status_code=401, detail="Missing Firebase ID token")
+        raise HTTPException(status_code=401, detail="Missing token")
 
     try:
-        signing_key = _jwk_client().get_signing_key_from_jwt(token)
-        payload: dict[str, Any] = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            audience=project_id,
-            issuer=f"https://securetoken.google.com/{project_id}",
-        )
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
     except Exception as exc:
-        raise HTTPException(status_code=401, detail="Invalid Firebase ID token") from exc
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
 
-    uid = payload.get("user_id") or payload.get("sub")
+    uid = payload.get("sub")
     if not isinstance(uid, str) or not uid:
-        raise HTTPException(status_code=401, detail="Invalid Firebase ID token")
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-    email = payload.get("email")
-    name = payload.get("name")
-    return AuthUser(
-        uid=uid,
-        email=email if isinstance(email, str) else None,
-        name=name if isinstance(name, str) else None,
-    )
+    return AuthUser(uid=uid, email=payload.get("email"))

@@ -17,7 +17,9 @@ from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketD
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from auth import AuthUser, require_firebase_user
+import bcrypt as _bcrypt
+
+from auth import AuthUser, issue_token, require_jwt_user
 from db import Database
 from mqtt_consumer import MQTTConsumer
 from repository import AlertRepository
@@ -49,6 +51,11 @@ def _check_gateway_rest(
 
 
 def _log_security_warnings(settings: Settings) -> None:
+    if not os.getenv("JWT_SECRET"):
+        log.warning(
+            "JWT_SECRET is not set: a random secret was generated — all tokens will be "
+            "invalidated on server restart. Set JWT_SECRET in the environment for production."
+        )
     if settings.gateway_api_key is None:
         log.warning(
             "GATEWAY_API_KEY is not set: /alerts/recent and /ws/alerts are unauthenticated",
@@ -357,9 +364,9 @@ def create_app() -> FastAPI:
     )
 
     def _auth_user(authorization: str | None) -> AuthUser:
-        return require_firebase_user(
+        return require_jwt_user(
             authorization=authorization,
-            project_id=settings.firebase_project_id,
+            secret=settings.jwt_secret,
         )
 
     @app.get("/routing/driving")
@@ -514,6 +521,56 @@ def create_app() -> FastAPI:
                 )
             row = await _profile_row(user.uid)
         return row
+
+    @app.post("/auth/signup", status_code=201)
+    async def signup(data: dict) -> dict:
+        email = _clean_optional_text(data.get("email"), 320)
+        password = str(data.get("password") or "").strip()
+        if not email or len(password) < 6:
+            raise HTTPException(
+                status_code=400,
+                detail="Email and password (min 6 chars) required",
+            )
+
+        uid = str(uuid.uuid4())
+        password_hash = _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+        async with db.pool.acquire() as conn:
+            try:
+                await conn.execute(
+                    "INSERT INTO credentials (uid, email, password_hash) VALUES ($1, $2, $3)",
+                    uid,
+                    email.lower(),
+                    password_hash,
+                )
+            except Exception as exc:
+                if "unique" in str(exc).lower():
+                    raise HTTPException(status_code=409, detail="email-already-in-use") from exc
+                raise
+
+        token = issue_token(uid, email.lower(), settings.jwt_secret, settings.jwt_expiry_hours)
+        return {"token": token, "uid": uid, "email": email.lower()}
+
+    @app.post("/auth/login")
+    async def login(data: dict) -> dict:
+        email = _clean_optional_text(data.get("email"), 320)
+        password = str(data.get("password") or "").strip()
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password required")
+
+        async with db.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT uid, password_hash FROM credentials WHERE email = $1",
+                email.lower(),
+            )
+
+        if row is None or not _bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+            raise HTTPException(status_code=401, detail="wrong-password")
+
+        token = issue_token(
+            row["uid"], email.lower(), settings.jwt_secret, settings.jwt_expiry_hours
+        )
+        return {"token": token, "uid": row["uid"], "email": email.lower()}
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

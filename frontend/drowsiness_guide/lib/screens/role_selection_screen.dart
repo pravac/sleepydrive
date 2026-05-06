@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:drowsiness_guide/services/auth_service.dart';
@@ -10,17 +9,12 @@ class RoleSelectionScreen extends StatefulWidget {
   final AuthService? authService;
   final UserRoleService? userRoleService;
 
-  /// When set (e.g. in tests), used instead of [FirebaseAuth.instance] for
-  /// the current user, so flows can run without a real Firebase session.
-  final User? Function()? currentUserProvider;
-
   const RoleSelectionScreen({
     super.key,
     required this.email,
     required this.password,
     this.authService,
     this.userRoleService,
-    this.currentUserProvider,
   });
 
   @override
@@ -38,8 +32,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   bool _isLoading = false;
   String? _errorText;
 
-  User? get _currentUser =>
-      widget.currentUserProvider?.call() ?? FirebaseAuth.instance.currentUser;
+  AuthUser? get _currentUser => _authService.currentUser;
 
   @override
   void initState() {
@@ -57,11 +50,9 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     super.dispose();
   }
 
-  Future<User> _ensureAuthenticatedUser() async {
+  Future<AuthUser> _ensureAuthenticatedUser() async {
     final existingUser = _currentUser;
-    if (existingUser != null) {
-      return existingUser;
-    }
+    if (existingUser != null) return existingUser;
 
     final email = widget.email?.trim() ?? '';
     final password = widget.password?.trim() ?? '';
@@ -70,18 +61,16 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     }
 
     try {
-      final credential = await _authService.createUserWithEmailPassword(
+      return await _authService.createUserWithEmailPassword(
         email: email,
         password: password,
       );
-      return credential.user!;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') {
-        final credential = await _authService.signInWithEmailPassword(
+    } on Exception catch (e) {
+      if (e.toString().contains('email-already-in-use')) {
+        return await _authService.signInWithEmailPassword(
           email: email,
           password: password,
         );
-        return credential.user!;
       }
       rethrow;
     }
@@ -101,25 +90,22 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
       }
       return 'Your account was created, but the app could not save your role. Please try again.';
     }
-    if (error is FirebaseAuthException) {
-      switch (error.code) {
-        case 'email-already-in-use':
-          return 'An account already exists with this email.';
-        case 'invalid-email':
-          return 'Please enter a valid email address.';
-        case 'weak-password':
-          return 'Password is too weak.';
-        case 'network-request-failed':
-          return 'Network error. Check your connection and try again.';
-        case 'operation-not-allowed':
-          return 'Email/password sign-up is not enabled in Firebase.';
-        case 'invalid-credential':
-        case 'wrong-password':
-        case 'user-not-found':
-          return 'The saved account credentials are no longer valid. Please go back and try again.';
-      }
+
+    final text = error.toString();
+    if (text.contains('email-already-in-use')) {
+      return 'An account already exists with this email.';
     }
-    return 'Could not create account: ${error.toString().replaceFirst('Exception: ', '')}';
+    if (text.contains('weak-password')) return 'Password is too weak.';
+    if (text.contains('network-request-failed') ||
+        text.contains('Connection refused') ||
+        text.contains('SocketException')) {
+      return 'Network error. Check your connection and try again.';
+    }
+    if (text.contains('wrong-password') || text.contains('invalid-credential')) {
+      return 'The saved account credentials are no longer valid. Please go back and try again.';
+    }
+
+    return 'Could not create account: ${text.replaceFirst('Exception: ', '')}';
   }
 
   Future<void> _saveRoleAndRoute({
@@ -142,7 +128,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         uid: user.uid,
         role: role,
         email: user.email ?? widget.email,
-        displayName: fullName.isNotEmpty ? fullName : user.displayName,
+        displayName: fullName.isNotEmpty ? fullName : null,
         fleetInviteCode: fleetInviteCode,
         deviceId: deviceId,
       );
@@ -168,7 +154,7 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   }
 
   Future<void> _handleBack() async {
-    if (FirebaseAuth.instance.currentUser != null) {
+    if (_authService.currentUser != null) {
       await _authService.signOut();
     }
     if (!mounted) return;

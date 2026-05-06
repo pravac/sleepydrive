@@ -23,6 +23,18 @@ def _ssl_context_for_dsn(dsn: str) -> ssl.SSLContext | None:
     return None
 
 
+CREDENTIALS_SQL = """
+CREATE TABLE IF NOT EXISTS credentials (
+    uid TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_credentials_email
+ON credentials (email);
+"""
+
 USERS_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     uid TEXT PRIMARY KEY,
@@ -142,6 +154,7 @@ class Database:
     async def init_schema(self) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(SCHEMA_SQL)
+            await conn.execute(CREDENTIALS_SQL)
             await conn.execute(USERS_SQL)
             await conn.execute(USERS_MIGRATION_SQL)
             await conn.execute(FLEETS_SQL)
